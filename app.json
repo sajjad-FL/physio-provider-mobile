@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "PhysioKhom Pro",
+    "slug": "physiokhom-pro",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "physiokhomp",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#f8fafc"
+    },
+    "assetBundlePatterns": [
+      "assets/images/*",
+      "assets/fonts/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.physiokhom.physio",
+      "jsEngine": "hermes",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.physiokhom.physio",
+      "enableProguardInReleaseBuilds": true,
+      "jsEngine": "hermes",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "plugins": [
+      "expo-web-browser",
+      "@react-native-community/datetimepicker",
+      "@rnmapbox/maps",
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "PhysioKhom Pro uses your location to set your coverage point for patient bookings."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PhysioKhom Pro accesses your photos so you can set a profile picture."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0d9488",
+          "defaultChannel": "default",
+          "sounds": [],
+          "enableBackgroundRemoteNotifications": false
+        }
+      ]
+    ]
+  }
+}
