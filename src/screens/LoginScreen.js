@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -44,16 +44,23 @@ export default function LoginScreen({ navigation }) {
   const [fieldErrors, setFieldErrors] = useState({})
   const [phoneFocused, setPhoneFocused] = useState(false)
   const [passFocused, setPassFocused] = useState(false)
+  const phoneInputRef = useRef(null)
+  const passwordInputRef = useRef(null)
   const { authEpoch } = useAuth()
   const { padBottom, scrollViewProps, keyboardAvoidingViewProps } = useKeyboardAwareScroll()
 
+  console.log('[LoginScreen.js] busy:', busy, 'hasToken:', Boolean(getTokenSync()))
+
   useEffect(() => {
+    console.log('[LoginScreen.js] useEffect running, hasToken:', Boolean(getTokenSync()))
     if (getTokenSync()) {
+      console.log('[LoginScreen.js] Redirecting to default dashboard target')
       navigation.dispatch(
         CommonActions.reset({ index: 0, routes: [{ name: getDefaultDashboardScreen() }] }),
       )
       return
     }
+    console.log('[LoginScreen.js] Setting busy to false')
     setBusy(false)
   }, [navigation, authEpoch])
 
@@ -169,15 +176,19 @@ export default function LoginScreen({ navigation }) {
             {/* Mobile field */}
             <View>
               <Text style={styles.fieldLabel}>Mobile number</Text>
-              <View style={[
-                styles.mobileField,
-                phoneFocused && styles.fieldFocused,
-                Boolean(fieldErrors.phone) && styles.fieldError,
-              ]}>
+              <Pressable
+                onPress={() => phoneInputRef.current?.focus()}
+                style={[
+                  styles.mobileField,
+                  phoneFocused && styles.fieldFocused,
+                  Boolean(fieldErrors.phone) && styles.fieldError,
+                ]}
+              >
                 <View style={styles.phonePrefix}>
                   <Text style={styles.phonePrefixTxt}>+91</Text>
                 </View>
                 <TextInput
+                  ref={phoneInputRef}
                   style={styles.textInput}
                   placeholder="Enter mobile number"
                   placeholderTextColor={colors.textTertiary}
@@ -193,19 +204,23 @@ export default function LoginScreen({ navigation }) {
                   onFocus={() => setPhoneFocused(true)}
                   onBlur={() => setPhoneFocused(false)}
                 />
-              </View>
+              </Pressable>
               {fieldErrors.phone ? <Text style={styles.fieldErrTxt}>{fieldErrors.phone}</Text> : null}
             </View>
 
             {/* Password field */}
             <View style={styles.fieldGap}>
               <Text style={styles.fieldLabel}>Password</Text>
-              <View style={[
-                styles.passField,
-                passFocused && styles.fieldFocused,
-                Boolean(fieldErrors.password) && styles.fieldError,
-              ]}>
+              <Pressable
+                onPress={() => passwordInputRef.current?.focus()}
+                style={[
+                  styles.passField,
+                  passFocused && styles.fieldFocused,
+                  Boolean(fieldErrors.password) && styles.fieldError,
+                ]}
+              >
                 <TextInput
+                  ref={passwordInputRef}
                   style={[styles.textInput, styles.passInput]}
                   placeholder="Enter password"
                   placeholderTextColor={colors.textTertiary}
@@ -232,7 +247,7 @@ export default function LoginScreen({ navigation }) {
                     color={colors.textTertiary}
                   />
                 </Pressable>
-              </View>
+              </Pressable>
               {fieldErrors.password ? <Text style={styles.fieldErrTxt}>{fieldErrors.password}</Text> : null}
             </View>
 

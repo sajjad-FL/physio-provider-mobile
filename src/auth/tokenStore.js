@@ -32,6 +32,17 @@ function webDelete(key) {
   } catch (_) {}
 }
 
+/** Web logout: wipe all origin storage (local + session). */
+function clearAllBrowserStorage() {
+  if (!USE_WEB_STORAGE) return
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.clear()
+  } catch (_) {}
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
+  } catch (_) {}
+}
+
 async function storageGetItem(key) {
   if (USE_WEB_STORAGE) return webGet(key)
   return SecureStore.getItemAsync(key)
@@ -95,16 +106,19 @@ export function getProfileCompleteSync() {
 }
 
 export async function hydrateFromStorage() {
+  console.log('[tokenStore.js] hydrateFromStorage started')
   try {
     const [t, r, pc] = await Promise.all([
       storageGetItem(TOKEN_KEY),
       storageGetItem(ROLE_KEY),
       storageGetItem(PROFILE_COMPLETE_KEY),
     ])
+    console.log('[tokenStore.js] hydrateFromStorage loaded keys:', { t: Boolean(t), r, pc })
     memoryToken = t || null
     memoryRole = r === 'physio' || r === 'admin' || r === 'user' ? r : r === 'patient' ? 'user' : 'user'
     memoryProfileComplete = pc === '1' ? true : pc === '0' ? false : null
-  } catch {
+  } catch (err) {
+    console.error('[tokenStore.js] hydrateFromStorage error:', err)
     memoryToken = null
     memoryRole = 'user'
     memoryProfileComplete = null
@@ -135,10 +149,14 @@ export async function clearSession() {
   memoryToken = null
   memoryRole = 'user'
   memoryProfileComplete = null
-  await Promise.all([
-    storageDeleteItem(TOKEN_KEY),
-    storageDeleteItem(ROLE_KEY),
-    storageDeleteItem(PROFILE_COMPLETE_KEY),
-  ])
+  if (USE_WEB_STORAGE) {
+    clearAllBrowserStorage()
+  } else {
+    await Promise.all([
+      storageDeleteItem(TOKEN_KEY),
+      storageDeleteItem(ROLE_KEY),
+      storageDeleteItem(PROFILE_COMPLETE_KEY),
+    ])
+  }
   emit()
 }

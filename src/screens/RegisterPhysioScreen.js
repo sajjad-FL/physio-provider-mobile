@@ -2,8 +2,10 @@ import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import * as DocumentPicker from 'expo-document-picker'
 import * as Location from 'expo-location'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Animated,
+  ActivityIndicator,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -13,17 +15,21 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Toast from 'react-native-toast-message'
-import { api } from '../api/client'
+import { api, postFormData } from '../api/client'
 import AppHeader from '../components/AppHeader'
+import MapPickerModal from '../components/booking/MapPickerModal'
+import EarningsEstimatorWidget from '../components/EarningsEstimatorWidget'
+import GovtIdDocumentSection from '../components/physio/GovtIdDocumentSection'
+import MultiInternshipDocRow from '../components/physio/MultiInternshipDocRow'
 import Button from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import DropdownField from '../components/ui/DropdownField'
 import Input from '../components/ui/Input'
+import PhysioNameInput from '../components/ui/PhysioNameInput'
 import { ID_PROOF_TYPE_OPTIONS } from '../constants/idProofTypes'
 import { PHYSIO_DEGREE_OPTIONS } from '../constants/physioQualification'
 import { colors } from '../theme/colors'
@@ -39,8 +45,16 @@ import {
   validateQualificationSection,
   validateRegistrationAccount,
 } from '../utils/onboardingValidation'
-import { formatPhysioSessionFeeLabel } from '../utils/physioSessionFee'
-import { appendFormDataFile, normalizePickedDocument } from '../utils/physioFormMultipart'
+import { extractApiFieldErrors, normalizeRegistrationApiErrors } from '../utils/apiFieldErrors'
+import { appendFormDataFile, appendFormDataFiles, isUploadableDocument, normalizePickedDocument } from '../utils/physioFormMultipart'
+import { pickMultipleDocuments } from '../utils/physioDocumentPicker'
+import { formatPhysioDisplayName } from '../utils/physioDisplayName'
+import { DOB_PICKER_MIN, defaultDobPickerDate } from '../utils/date'
+import { reverseGeocodeToAddress } from '../utils/geocode'
+import {
+  hasVisibleFieldErrors,
+  validateRegistrationLiveField,
+} from '../utils/registrationLiveValidation'
 
 const STEPS = [
   { n: 1, title: 'Account & basic' },
@@ -68,9 +82,6 @@ const SERVICE_TYPE_OPTIONS = [
 ]
 
 const DEGREE_DROPDOWN_OPTIONS = PHYSIO_DEGREE_OPTIONS.map((d) => ({ value: d, label: d }))
-
-const DOB_MIN = new Date(1900, 0, 1)
-const DOB_DEFAULT = new Date(1998, 0, 15)
 
 function formatYmd(date) {
   const y = date.getFullYear()
@@ -103,7 +114,7 @@ function ErrorBanner({ formError, fieldErrors }) {
   )
 }
 
-function DocRow({ title, subtitle, asset, error, onPick }) {
+function DocRow({ title, subtitle, asset, error, onPick, isOptional = false }) {
   const mime = String(asset?.mimeType || '').toLowerCase()
   const isImage = mime.startsWith('image/')
   const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(String(asset?.name || ''))
@@ -111,34 +122,68 @@ function DocRow({ title, subtitle, asset, error, onPick }) {
     ? asset.name && String(asset.name).trim()
       ? asset.name
       : 'Selected file'
-    : 'No file chosen'
+    : null
 
   return (
-    <View style={styles.docRow}>
-      <Text style={styles.docTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.docSub}>{subtitle}</Text> : null}
+    <Pressable 
+      onPress={onPick}
+      style={({ pressed }) => [
+        styles.docRowPremium,
+        asset?.uri ? styles.docRowUploaded : styles.docRowEmpty,
+        error ? styles.docRowError : null,
+        pressed && styles.docRowPressed
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`Pick file for ${title}`}
+    >
+      <View style={styles.docRowHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.docTitlePremium}>{title}</Text>
+          {subtitle ? <Text style={styles.docSubPremium}>{subtitle}</Text> : null}
+        </View>
+        
+        {/* Status Badge */}
+        {asset?.uri ? (
+          <View style={styles.badgeSuccess}>
+            <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+            <Text style={styles.badgeSuccessText}>Ready</Text>
+          </View>
+        ) : isOptional ? (
+          <View style={styles.badgeOptional}>
+            <Text style={styles.badgeOptionalText}>Optional</Text>
+          </View>
+        ) : (
+          <View style={styles.badgeRequired}>
+            <Text style={styles.badgeRequiredText}>Required</Text>
+          </View>
+        )}
+      </View>
+
       {asset?.uri ? (
-        <View style={styles.docPreviewRow}>
+        <View style={styles.docPreviewContainer}>
           {isImage ? (
-            <Image source={{ uri: asset.uri }} style={styles.docThumb} accessibilityIgnoresInvertColors />
+            <Image source={{ uri: asset.uri }} style={styles.docThumbPremium} accessibilityIgnoresInvertColors />
           ) : (
-            <View style={styles.docIconWrap}>
-              <Ionicons name={isPdf ? 'document-text-outline' : 'document-attach-outline'} size={28} color={colors.brand} />
+            <View style={styles.docIconWrapPremium}>
+              <Ionicons name={isPdf ? 'document-text' : 'document-attach'} size={24} color={colors.brand} />
             </View>
           )}
-          <Text style={[styles.docName, styles.docNameInRow]} numberOfLines={2}>
-            {displayName}
-          </Text>
+          <View style={styles.docDetailsCol}>
+            <Text style={styles.docNamePremium} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Text style={styles.tapToReplace}>Tap anywhere to replace file</Text>
+          </View>
         </View>
       ) : (
-        <Text style={styles.docName} numberOfLines={2}>
-          {displayName}
-        </Text>
+        <View style={styles.uploadPromptRow}>
+          <Ionicons name="cloud-upload-outline" size={20} color={colors.brand} />
+          <Text style={styles.uploadPromptText}>Tap to choose a file</Text>
+        </View>
       )}
+      
       {error ? <Text style={styles.fieldErr}>{error}</Text> : null}
-      <View style={{ height: 8 }} />
-      <Button title={asset?.uri ? 'Replace file' : 'Choose file'} variant="outline" onPress={onPick} />
-    </View>
+    </Pressable>
   )
 }
 
@@ -147,18 +192,39 @@ export default function RegisterPhysioScreen({ navigation }) {
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
 
+  const fadeAnim = useRef(new Animated.Value(1)).current
+  const progressAnim = useRef(new Animated.Value(0.2)).current
+
+  useEffect(() => {
+    fadeAnim.setValue(0)
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 250,
+      useNativeDriver: true,
+    }).start()
+  }, [step])
+
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: step / 5,
+      duration: 300,
+      useNativeDriver: false,
+    }).start()
+  }, [step, progressAnim])
+
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [dob, setDob] = useState('')
   const [gender, setGender] = useState('')
-  const [address, setAddress] = useState('')
   const [location, setLocation] = useState('')
   const [locationLat, setLocationLat] = useState(null)
   const [locationLng, setLocationLng] = useState(null)
-  const [latStr, setLatStr] = useState('')
-  const [lngStr, setLngStr] = useState('')
+  const [mapPickerOpen, setMapPickerOpen] = useState(false)
+  const [mapPin, setMapPin] = useState({ lat: 26.14, lng: 91.74 })
+  const [locating, setLocating] = useState(false)
+  const [locationLookupBusy, setLocationLookupBusy] = useState(false)
 
   const [avatarAsset, setAvatarAsset] = useState(null)
 
@@ -171,14 +237,12 @@ export default function RegisterPhysioScreen({ navigation }) {
   const [specialization, setSpecialization] = useState('')
   const [serviceType, setServiceType] = useState('both')
   const [areas, setAreas] = useState('')
-  const [feeMin, setFeeMin] = useState('')
 
   const [fCertificate, setFCertificate] = useState(null)
   const [fIdProof, setFIdProof] = useState(null)
   const [fRegCert, setFRegCert] = useState(null)
   const [fSelfie, setFSelfie] = useState(null)
-  const [fInternship, setFInternship] = useState(null)
-  const [fCouncil, setFCouncil] = useState(null)
+  const [fInternships, setFInternships] = useState([])
   const [idProofType, setIdProofType] = useState('')
   const [qualificationAgreed, setQualificationAgreed] = useState(false)
 
@@ -192,13 +256,32 @@ export default function RegisterPhysioScreen({ navigation }) {
 
   const [keyboardInset, setKeyboardInset] = useState(0)
   const [dobPickerVisible, setDobPickerVisible] = useState(false)
-  const [pickerTempDate, setPickerTempDate] = useState(() => DOB_DEFAULT)
   const maxDob = useMemo(() => new Date(), [])
+  const [pickerTempDate, setPickerTempDate] = useState(() => defaultDobPickerDate(new Date()))
 
   const clearErrors = useCallback(() => {
     setFieldErrors({})
     setFormError('')
   }, [])
+
+  const patchField = useCallback(
+    (fieldName, value, extra = {}) => {
+      const err = validateRegistrationLiveField(fieldName, value, {
+        locationLat,
+        locationLng,
+        ...extra,
+      })
+      setFieldErrors((prev) => {
+        const next = { ...prev, [fieldName]: err }
+        if (!err) delete next[fieldName]
+        if (!hasVisibleFieldErrors(next)) {
+          setFormError('')
+        }
+        return next
+      })
+    },
+    [locationLat, locationLng],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -237,16 +320,109 @@ export default function RegisterPhysioScreen({ navigation }) {
     }
   }, [])
 
-  function syncCoordsFromStrings() {
-    const la = parseFloat(String(latStr).trim())
-    const ln = parseFloat(String(lngStr).trim())
-    if (Number.isFinite(la) && Number.isFinite(ln)) {
-      setLocationLat(la)
-      setLocationLng(ln)
+  async function applyCoverageFromCoords(lat, lng) {
+    setLocationLat(lat)
+    setLocationLng(lng)
+    setLocationLookupBusy(true)
+    setFieldErrors((prev) => ({ ...prev, location: '' }))
+    try {
+      const label = await reverseGeocodeToAddress(lat, lng)
+      if (label) {
+        setLocation(label)
+        patchField('location', label, { locationLat: lat, locationLng: lng })
+        return label
+      }
+      setLocation('')
+      patchField('location', '', { locationLat: lat, locationLng: lng })
+      Toast.show({
+        type: 'error',
+        text1: 'Address lookup failed',
+        text2: 'Try a nearby point on the map or check your internet connection.',
+      })
+      return ''
+    } finally {
+      setLocationLookupBusy(false)
     }
   }
 
-  async function pickDoc(label, setter, avatar = false) {
+  function openMapPicker() {
+    const lat = Number.isFinite(locationLat) ? locationLat : 26.14
+    const lng = Number.isFinite(locationLng) ? locationLng : 91.74
+    setMapPin({ lat, lng })
+    setMapPickerOpen(true)
+  }
+
+  async function applyMapPin() {
+    const lat = Number(mapPin?.lat)
+    const lng = Number(mapPin?.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      Toast.show({ type: 'error', text1: 'Pick a valid location on the map' })
+      return
+    }
+    setMapPickerOpen(false)
+    const label = await applyCoverageFromCoords(lat, lng)
+    if (label) {
+      Toast.show({ type: 'success', text1: 'Coverage area updated' })
+    }
+  }
+
+  async function useMyLocationForMapPicker() {
+    setLocating(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== 'granted') {
+        Toast.show({ type: 'error', text1: 'Location permission denied' })
+        return
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const lat = pos.coords.latitude
+      const lng = pos.coords.longitude
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        Toast.show({ type: 'error', text1: 'Could not read GPS coordinates' })
+        return
+      }
+      setMapPin({ lat, lng })
+      Toast.show({ type: 'success', text1: 'Map moved to your location' })
+    } catch (e) {
+      Toast.show({ type: 'error', text1: e.message || 'Could not read GPS' })
+    } finally {
+      setLocating(false)
+    }
+  }
+
+  async function useGpsForCoverage() {
+    setLocating(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== 'granted') {
+        Toast.show({ type: 'error', text1: 'Location permission denied' })
+        return
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      const label = await applyCoverageFromCoords(pos.coords.latitude, pos.coords.longitude)
+      if (label) {
+        Toast.show({ type: 'success', text1: 'Location captured' })
+      }
+    } catch (e) {
+      Toast.show({ type: 'error', text1: e.message || 'Could not read GPS' })
+    } finally {
+      setLocating(false)
+    }
+  }
+
+  async function addInternshipCertificates() {
+    const picked = await pickMultipleDocuments('Internship certificate')
+    if (!picked.length) return
+    setFInternships((prev) => [...prev, ...picked])
+    patchField('internshipCertificate', picked[0])
+    setFieldErrors((prev) => ({ ...prev, internshipCertificate: '' }))
+  }
+
+  function removeInternshipCertificate(index) {
+    setFInternships((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function pickDoc(label, setter, avatar = false, fieldKey = null) {
     try {
       const res = await DocumentPicker.getDocumentAsync({
         type: avatar ? ['image/*'] : ['image/*', 'application/pdf'],
@@ -284,41 +460,19 @@ export default function RegisterPhysioScreen({ navigation }) {
       }
       setter(wrapped)
       if (avatar) {
-        setFieldErrors((prev) => ({ ...prev, avatar: '' }))
+        patchField('avatar', wrapped)
+      } else if (fieldKey) {
+        patchField(fieldKey, wrapped)
       }
     } catch (e) {
       Toast.show({ type: 'error', text1: e.message || 'Could not pick file' })
     }
   }
 
-  async function useCurrentLocation() {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync()
-      if (status !== 'granted') {
-        Toast.show({ type: 'error', text1: 'Location permission denied' })
-        return
-      }
-      const pos = await Location.getCurrentPositionAsync({})
-      const la = pos.coords.latitude
-      const ln = pos.coords.longitude
-      setLocationLat(la)
-      setLocationLng(ln)
-      setLatStr(String(la.toFixed(6)))
-      setLngStr(String(ln.toFixed(6)))
-      if (!location.trim()) {
-        setLocation(`Coverage (${la.toFixed(5)}, ${ln.toFixed(5)})`)
-      }
-      Toast.show({ type: 'success', text1: 'Location captured' })
-    } catch (e) {
-      Toast.show({ type: 'error', text1: e.message || 'Could not read GPS' })
-    }
-  }
-
   function computeCoords() {
-    const la = parseFloat(String(latStr).trim())
-    const ln = parseFloat(String(lngStr).trim())
-    if (Number.isFinite(la) && Number.isFinite(ln)) return { lat: la, lng: ln }
-    if (locationLat != null && locationLng != null) return { lat: locationLat, lng: locationLng }
+    if (Number.isFinite(locationLat) && Number.isFinite(locationLng)) {
+      return { lat: locationLat, lng: locationLng }
+    }
     return { lat: NaN, lng: NaN }
   }
 
@@ -331,19 +485,16 @@ export default function RegisterPhysioScreen({ navigation }) {
       location,
       dob: dob || undefined,
       gender,
-      address,
     })
     const merged = { ...e1.errors, ...e2.errors }
-    if (avatarAsset) {
-      const av = validateAvatarFile(avatarAsset)
-      if (!av.ok) merged.avatar = av.message
-    }
+    const av = validateAvatarFile(avatarAsset, { required: true })
+    if (!av.ok) merged.avatar = av.message
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       merged.location =
         merged.location ||
-        'Set coverage latitude & longitude (use GPS or type values from Maps) — both are required.'
+        'Pick on map or use GPS to set your coverage area (required).'
     } else if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      merged.location = merged.location || 'Invalid coordinates'
+      merged.location = merged.location || 'Invalid map location'
     }
     return merged
   }
@@ -368,7 +519,6 @@ export default function RegisterPhysioScreen({ navigation }) {
     setSaving(true)
     try {
       if (fromStep === 1) {
-        syncCoordsFromStrings()
         const merged = computeAccountBasicErrors()
         if (Object.keys(merged).length) {
           setFieldErrors(merged)
@@ -391,7 +541,6 @@ export default function RegisterPhysioScreen({ navigation }) {
           specialization,
           serviceType,
           areas,
-          feeMin,
         })
         if (Object.keys(errors).length) {
           setFieldErrors(errors)
@@ -401,7 +550,7 @@ export default function RegisterPhysioScreen({ navigation }) {
       }
       if (fromStep === 4) {
         const { errors, ok } = validateDocumentsStep(
-          { fCertificate, fIdProof, fRegCert, fSelfie, fInternship, fCouncil },
+          { fCertificate, fIdProof, fRegCert, fSelfie, fInternships },
           {},
           {
             requireQualificationDeclaration: ndaPolicy.requireQualificationDeclaration,
@@ -416,9 +565,8 @@ export default function RegisterPhysioScreen({ navigation }) {
           return
         }
         const checks = [
-          [fCertificate, 'Qualification certificate'],
-          [fIdProof, 'ID proof'],
-          [fRegCert, 'Registration certificate'],
+          [fCertificate, 'BPT/MPT pass certificate'],
+          [fIdProof, 'GOVERNMENT ID'],
           [fSelfie, 'Selfie with ID'],
         ]
         for (const [file, label] of checks) {
@@ -429,17 +577,20 @@ export default function RegisterPhysioScreen({ navigation }) {
             return
           }
         }
-        for (const [file, label] of [
-          [fInternship, 'Internship certificate'],
-          [fCouncil, 'Council registration certificate'],
-        ]) {
-          if (file) {
-            const r = validateFileAsset(file, label)
-            if (!r.ok) {
-              setFieldErrors({ file: r.message })
-              setFormError(r.message)
-              return
-            }
+        if (fRegCert) {
+          const r = validateFileAsset(fRegCert, 'NCAHP/IAP registration certificate')
+          if (!r.ok) {
+            setFieldErrors({ file: r.message })
+            setFormError(r.message)
+            return
+          }
+        }
+        for (const file of fInternships) {
+          const r = validateFileAsset(file, 'Internship certificate')
+          if (!r.ok) {
+            setFieldErrors({ file: r.message })
+            setFormError(r.message)
+            return
           }
         }
       }
@@ -456,7 +607,45 @@ export default function RegisterPhysioScreen({ navigation }) {
       Toast.show({ type: 'error', text1: 'Confirm the qualification declaration' })
       return
     }
-    syncCoordsFromStrings()
+    const merged = computeAccountBasicErrors()
+    Object.assign(merged, validateRegistrationAccount({ phone, password }).errors)
+    Object.assign(
+      merged,
+      validateQualificationSection({ degree, university, year, registrationNumber }).errors,
+    )
+    Object.assign(
+      merged,
+      validatePracticeSection({ experience, specialization, serviceType, areas }).errors,
+    )
+    const { errors: docErrors, ok: docsOk } = validateDocumentsStep(
+      { fCertificate, fIdProof, fRegCert, fSelfie, fInternships },
+      {},
+      {
+        requireQualificationDeclaration: ndaPolicy.requireQualificationDeclaration,
+        declarationAccepted: qualificationAgreed,
+        idProofType,
+      },
+    )
+    Object.assign(merged, docErrors)
+    if (Object.keys(merged).length) {
+      setFieldErrors(merged)
+      setFormError('Fix the errors below before submitting')
+      Toast.show({ type: 'error', text1: 'Complete all required fields and documents' })
+      if (merged.certificate || merged.internshipCertificate || merged.idProof || merged.selfieWithId) {
+        setStep(4)
+      } else if (merged.degree || merged.university || merged.year) {
+        setStep(2)
+      } else if (merged.experience || merged.specialization || merged.areas) {
+        setStep(3)
+      } else {
+        setStep(1)
+      }
+      return
+    }
+    if (!docsOk) {
+      setStep(4)
+      return
+    }
     const { lat, lng } = computeCoords()
     setSaving(true)
     clearErrors()
@@ -469,11 +658,10 @@ export default function RegisterPhysioScreen({ navigation }) {
       }
       fd.append('phone', pv.normalized)
       fd.append('password', password)
-      fd.append('name', name.trim())
+      fd.append('name', formatPhysioDisplayName(name))
       fd.append('email', email.trim().toLowerCase())
       if (dob) fd.append('dob', dob)
       if (gender) fd.append('gender', gender)
-      if (address.trim()) fd.append('address', address.trim())
       fd.append('location', location.trim())
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
         fd.append('lat', String(lat))
@@ -487,18 +675,46 @@ export default function RegisterPhysioScreen({ navigation }) {
       fd.append('specialization', specialization.trim())
       fd.append('serviceType', serviceType)
       fd.append('areas', areas)
-      fd.append('feeMin', String(feeMin))
-      appendFormDataFile(fd, 'avatar', avatarAsset)
-      appendFormDataFile(fd, 'certificate', fCertificate)
-      appendFormDataFile(fd, 'idProof', fIdProof)
+
+      const fileChecks = [
+        [avatarAsset, 'avatar', 'Passport size photo'],
+        [fCertificate, 'certificate', 'BPT/MPT pass certificate'],
+        [fIdProof, 'idProof', 'GOVERNMENT ID'],
+        [fSelfie, 'selfieWithId', 'Selfie with ID'],
+      ]
+      for (const [asset, , label] of fileChecks) {
+        if (!isUploadableDocument(asset)) {
+          Toast.show({ type: 'error', text1: `${label} is missing`, text2: 'Go back to Documents and re-select the file.' })
+          setStep(4)
+          return
+        }
+      }
+      if (!fInternships.some(isUploadableDocument)) {
+        Toast.show({ type: 'error', text1: 'Internship certificate is missing', text2: 'Add at least one internship certificate.' })
+        setStep(4)
+        return
+      }
+
+      let attached = 0
+      if (await appendFormDataFile(fd, 'avatar', avatarAsset)) attached += 1
+      if (await appendFormDataFile(fd, 'certificate', fCertificate)) attached += 1
+      if (await appendFormDataFile(fd, 'idProof', fIdProof)) attached += 1
       fd.append('idProofType', String(idProofType).trim().toLowerCase())
-      appendFormDataFile(fd, 'registrationCertificate', fRegCert)
-      appendFormDataFile(fd, 'selfieWithId', fSelfie)
-      if (fInternship) appendFormDataFile(fd, 'internshipCertificate', fInternship)
-      if (fCouncil) appendFormDataFile(fd, 'councilRegistrationCertificate', fCouncil)
+      if (fRegCert) await appendFormDataFile(fd, 'registrationCertificate', fRegCert)
+      if (await appendFormDataFile(fd, 'selfieWithId', fSelfie)) attached += 1
+      attached += await appendFormDataFiles(fd, 'internshipCertificate', fInternships)
+      if (attached < 5) {
+        Toast.show({
+          type: 'error',
+          text1: 'Could not attach documents',
+          text2: 'Re-select your files on the Documents step and try again.',
+        })
+        setStep(4)
+        return
+      }
       fd.append('qualificationDeclaration', qualificationAgreed ? 'true' : 'false')
 
-      await api.post('/auth/register-physio', fd)
+      await postFormData('/auth/register-physio', fd)
 
       Toast.show({
         type: 'success',
@@ -508,10 +724,17 @@ export default function RegisterPhysioScreen({ navigation }) {
       navigation.replace('Login')
     } catch (e) {
       const data = e.response?.data
-      if (data?.errors && typeof data.errors === 'object') {
-        setFieldErrors(data.errors)
-        setFormError(data.message || 'Please fix the errors below')
-        Toast.show({ type: 'error', text1: data.message || 'Registration failed' })
+      const rawErrors = extractApiFieldErrors(data)
+      if (Object.keys(rawErrors).length) {
+        const normalized = normalizeRegistrationApiErrors(rawErrors)
+        setFieldErrors(normalized)
+        setFormError(data?.message || 'Please fix the errors below')
+        Toast.show({
+          type: 'error',
+          text1: rawErrors.feeMin
+            ? 'Server update required — contact support or retry after deploy'
+            : data?.message || 'Registration failed',
+        })
       } else {
         Toast.show({ type: 'error', text1: data?.message || e.message || 'Registration failed' })
       }
@@ -521,18 +744,17 @@ export default function RegisterPhysioScreen({ navigation }) {
   }
 
   function openDobPicker() {
-    setPickerTempDate(parseDobToDate(dob) || DOB_DEFAULT)
+    setPickerTempDate(parseDobToDate(dob) || defaultDobPickerDate(maxDob))
     setDobPickerVisible(true)
   }
 
   function applyPickedDob(date) {
-    setDob(formatYmd(date))
-    setFieldErrors((f) => ({ ...f, dob: '' }))
+    const ymd = formatYmd(date)
+    setDob(ymd)
+    patchField('dob', ymd)
   }
 
-  const ccoords = computeCoords()
-  const coordsReviewStr =
-    Number.isFinite(ccoords.lat) && Number.isFinite(ccoords.lng) ? `${ccoords.lat.toFixed(5)}, ${ccoords.lng.toFixed(5)}` : '—'
+  const coveragePinned = Number.isFinite(locationLat) && Number.isFinite(locationLng)
 
   /** Space for footer row + safe area + keyboard so fields can scroll above the keyboard (esp. Android). */
   const footerReserve = step < 5 ? 88 + insets.bottom : 0
@@ -566,12 +788,15 @@ export default function RegisterPhysioScreen({ navigation }) {
         }
       />
       <View style={styles.mainCol}>
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        nestedScrollEnabled
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-        contentContainerStyle={[styles.scrollPad, { paddingBottom: scrollBottomPad }]}
+        {/* Ambient Top Background Halo Glow */}
+        <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+        <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={[styles.scrollPad, { paddingBottom: scrollBottomPad }]}
         showsVerticalScrollIndicator={false}
         style={styles.scrollFlex}
       >
@@ -581,24 +806,53 @@ export default function RegisterPhysioScreen({ navigation }) {
           platform.
         </Text>
         <View style={{ height: 16 }} />
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          nestedScrollEnabled
-          contentContainerStyle={styles.stepRow}
-        >
-          {STEPS.map((s) => (
-            <Pressable
-              key={s.n}
-              onPress={() => tryGoToStep(s.n)}
-              style={[styles.stepChip, step === s.n ? styles.stepChipOn : styles.stepChipOff]}
-            >
-              <Text style={[styles.stepChipText, step === s.n ? styles.stepChipTextOn : null]}>
-                {s.n}. {s.title}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <View style={styles.premiumProgressContainer}>
+          <View style={styles.progressTextRow}>
+            <Text style={styles.progressSub}>STEP {step} OF 5</Text>
+            <Text style={styles.progressTitle}>{STEPS[step - 1].title}</Text>
+          </View>
+          
+          <View style={styles.progressTrack}>
+            <Animated.View 
+              style={[
+                styles.progressBar, 
+                { 
+                  width: progressAnim.interpolate({
+                    inputRange: [0.2, 1],
+                    outputRange: ['20%', '100%'],
+                  }) 
+                }
+              ]} 
+            />
+          </View>
+
+          <View style={styles.miniStepsRow}>
+            {STEPS.map((s) => {
+              const isActive = step === s.n
+              const isCompleted = step > s.n
+              return (
+                <Pressable
+                  key={s.n}
+                  onPress={() => tryGoToStep(s.n)}
+                  style={[
+                    styles.miniStepDot,
+                    isActive && styles.miniStepDotActive,
+                    isCompleted && styles.miniStepDotCompleted,
+                  ]}
+                  hitSlop={8}
+                >
+                  <Text style={[
+                    styles.miniStepText,
+                    isActive && styles.miniStepTextActive,
+                    isCompleted && styles.miniStepTextCompleted,
+                  ]}>
+                    {s.n}
+                  </Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </View>
 
         <View style={{ height: 16 }} />
         <ErrorBanner formError={formError} fieldErrors={fieldErrors} />
@@ -607,40 +861,64 @@ export default function RegisterPhysioScreen({ navigation }) {
           <Card padding="lg" style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Account & basic info</Text>
             <View style={{ height: 14 }} />
+            <PhysioNameInput
+              value={name}
+              onChangeText={(v) => {
+                setName(v)
+                patchField('name', v)
+              }}
+              error={fieldErrors.name}
+              placeholder="Your name"
+              returnKeyType="next"
+              blurOnSubmit={false}
+            />
+            <Animated.View style={{ opacity: fadeAnim }}>
+            <View style={{ height: 12 }} />
             <Input
-              label="Phone (for account)"
+              label="Phone Number"
               keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              autoComplete="tel"
-              importantForAutofill="yes"
+              textContentType="none"
+              autoComplete="off"
+              importantForAutofill="no"
               autoCorrect={false}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(v) => {
+                setPhone(v)
+                patchField('phone', v)
+              }}
               error={fieldErrors.phone}
               placeholder="Enter mobile number"
+              returnKeyType="next"
+              blurOnSubmit={false}
             />
             <View style={{ height: 12 }} />
             <Input
-              label="Password (min 8)"
+              label="Password (min 6)"
               secureTextEntry
-              textContentType="newPassword"
-              autoComplete="password-new"
-              importantForAutofill="yes"
+              textContentType="none"
+              autoComplete="off"
+              importantForAutofill="no"
               autoCorrect={false}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(v) => {
+                setPassword(v)
+                patchField('password', v)
+              }}
               error={fieldErrors.password}
               placeholder="Enter password"
+              returnKeyType="next"
+              blurOnSubmit={false}
             />
-            <View style={{ height: 12 }} />
-            <Input label="Full name" value={name} onChangeText={setName} error={fieldErrors.name} placeholder="Enter full name" />
             <View style={{ height: 12 }} />
             <Input
               label="Email"
               keyboardType="email-address"
               autoCapitalize="none"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(v) => {
+                setEmail(v)
+                patchField('email', v)
+              }}
               error={fieldErrors.email}
               placeholder="Enter email address"
             />
@@ -665,7 +943,10 @@ export default function RegisterPhysioScreen({ navigation }) {
               <Input
                 label="Date of birth (YYYY-MM-DD)"
                 value={dob}
-                onChangeText={setDob}
+                onChangeText={(v) => {
+                  setDob(v)
+                  patchField('dob', v)
+                }}
                 error={fieldErrors.dob}
                 placeholder="YYYY-MM-DD"
               />
@@ -679,77 +960,89 @@ export default function RegisterPhysioScreen({ navigation }) {
                 options={GENDER_DROPDOWN_OPTIONS}
                 onSelect={(v) => {
                   setGender(v)
-                  setFieldErrors((prev) => ({ ...prev, gender: '' }))
+                  patchField('gender', v)
                 }}
                 variant="inline"
               />
               {fieldErrors.gender ? <Text style={styles.fieldErr}>{fieldErrors.gender}</Text> : null}
             </View>
-            <Text style={styles.pickLabel}>Address</Text>
-            <TextInput
-              style={[styles.textArea, fieldErrors.address ? styles.textAreaErr : null]}
-              value={address}
-              onChangeText={setAddress}
-              placeholder="Enter street, locality"
-              placeholderTextColor={colors.textTertiary}
-              multiline
-            />
-            {fieldErrors.address ? <Text style={styles.fieldErr}>{fieldErrors.address}</Text> : null}
-            <View style={{ height: 12 }} />
             <Text style={styles.sectionTitle}>Coverage / location</Text>
             <Text style={styles.help}>
-              Type a label patients will see and set latitude & longitude (GPS or paste from Maps). Both coordinates
-              are required for bookings.
+              Patients see this when booking. Use Pick on map or Use GPS — you cannot type the address manually.
             </Text>
-            <Input
-              label="Coverage label (area)"
-              value={location}
-              onChangeText={setLocation}
-              error={fieldErrors.location}
-              placeholder="e.g. Central Guwahati, Beltola"
-            />
             <View style={{ height: 10 }} />
-            <Button title="Use current GPS location" variant="outline" onPress={useCurrentLocation} />
+            <View style={styles.mapActionRow}>
+              <Pressable
+                style={[styles.mapActionBtn, locationLookupBusy && styles.mapActionBtnDisabled]}
+                onPress={openMapPicker}
+                disabled={locationLookupBusy}
+              >
+                <Ionicons name="map" size={16} color={colors.brand} />
+                <Text style={styles.mapActionBtnTxt}>Pick on map</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.mapActionBtn, (locating || locationLookupBusy) && styles.mapActionBtnDisabled]}
+                onPress={useGpsForCoverage}
+                disabled={locating || locationLookupBusy}
+              >
+                <Ionicons name="locate-outline" size={16} color={colors.brand} />
+                <Text style={styles.mapActionBtnTxt}>
+                  {locating || locationLookupBusy ? 'Locating…' : 'Use GPS'}
+                </Text>
+              </Pressable>
+            </View>
             <View style={{ height: 12 }} />
-            <Input
-              label="Latitude"
-              value={latStr}
-              onChangeText={(t) => {
-                setLatStr(t)
-                const v = parseFloat(t.trim())
-                setLocationLat(Number.isFinite(v) ? v : null)
-              }}
-              keyboardType="decimal-pad"
-              placeholder="e.g. 26.144516"
-            />
-            <View style={{ height: 12 }} />
-            <Input
-              label="Longitude"
-              value={lngStr}
-              onChangeText={(t) => {
-                setLngStr(t)
-                const v = parseFloat(t.trim())
-                setLocationLng(Number.isFinite(v) ? v : null)
-              }}
-              keyboardType="decimal-pad"
-              placeholder="e.g. 91.736226"
-            />
-            {locationLat != null && locationLng != null && Number.isFinite(locationLat) && Number.isFinite(locationLng) ? (
-              <Text style={styles.coordHint}>
-                Map point: {locationLat.toFixed(5)}, {locationLng.toFixed(5)}
-              </Text>
-            ) : null}
+            <Text style={styles.pickLabel}>Selected coverage area</Text>
+            <View
+              style={[
+                styles.locationReadonly,
+                fieldErrors.location ? styles.locationReadonlyErr : null,
+                coveragePinned && location ? styles.locationReadonlySet : null,
+              ]}
+            >
+              {locationLookupBusy ? (
+                <>
+                  <ActivityIndicator size="small" color={colors.brand} style={styles.locationReadonlyIcon} />
+                  <Text style={[styles.locationReadonlyText, styles.locationReadonlyPlaceholder]}>
+                    Looking up address…
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons
+                    name={location ? 'location' : 'location-outline'}
+                    size={18}
+                    color={location ? colors.brand : colors.textTertiary}
+                    style={styles.locationReadonlyIcon}
+                  />
+                  <Text
+                    style={[styles.locationReadonlyText, !location ? styles.locationReadonlyPlaceholder : null]}
+                    numberOfLines={5}
+                  >
+                    {location || 'No location selected yet — pick on map or use GPS'}
+                  </Text>
+                </>
+              )}
+            </View>
+            {fieldErrors.location ? <Text style={styles.fieldErr}>{fieldErrors.location}</Text> : null}
 
             <View style={{ height: 16 }} />
-            <Text style={styles.pickLabel}>Profile photo (optional)</Text>
+            <Text style={styles.pickLabel}>Passport size photo with clear background</Text>
+            <Text style={styles.help}>Required — upload a clear passport-style photo.</Text>
             {avatarAsset?.uri ? (
               <Image source={{ uri: avatarAsset.uri }} style={styles.avatar} />
             ) : null}
-            <Button title={avatarAsset ? 'Change photo' : 'Choose photo'} variant="outline" onPress={() => pickDoc('Profile photo', setAvatarAsset, true)} />
+            <Button
+              title={avatarAsset ? 'Change photo' : 'Choose photo'}
+              variant="outline"
+              onPress={() => pickDoc('Passport size photo', setAvatarAsset, true)}
+            />
             {fieldErrors.avatar ? <Text style={styles.fieldErr}>{fieldErrors.avatar}</Text> : null}
+            </Animated.View>
           </Card>
         )}
 
+        <Animated.View style={{ opacity: fadeAnim }}>
         {step === 2 && (
           <Card padding="lg" style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Qualification</Text>
@@ -762,7 +1055,7 @@ export default function RegisterPhysioScreen({ navigation }) {
                 options={DEGREE_DROPDOWN_OPTIONS}
                 onSelect={(v) => {
                   setDegree(v)
-                  setFieldErrors((prev) => ({ ...prev, degree: '' }))
+                  patchField('degree', v)
                 }}
                 variant="inline"
               />
@@ -772,7 +1065,10 @@ export default function RegisterPhysioScreen({ navigation }) {
             <Input
               label="University"
               value={university}
-              onChangeText={setUniversity}
+              onChangeText={(v) => {
+                setUniversity(v)
+                patchField('university', v)
+              }}
               error={fieldErrors.university}
               placeholder="Enter university or college"
             />
@@ -781,17 +1077,23 @@ export default function RegisterPhysioScreen({ navigation }) {
               label="Passing year"
               keyboardType="number-pad"
               value={year}
-              onChangeText={setYear}
+              onChangeText={(v) => {
+                setYear(v)
+                patchField('year', v)
+              }}
               error={fieldErrors.year}
               placeholder="e.g. 2018"
             />
             <View style={{ height: 12 }} />
             <Input
-              label="Council registration no (optional)"
+              label="NCAHP/IAP registration no. (optional)"
               value={registrationNumber}
-              onChangeText={setRegistrationNumber}
+              onChangeText={(v) => {
+                setRegistrationNumber(v)
+                patchField('registrationNumber', v)
+              }}
               error={fieldErrors.registrationNumber}
-              placeholder="If registered, enter council number"
+              placeholder="Enter NCAHP/IAP registration number"
             />
           </Card>
         )}
@@ -804,7 +1106,10 @@ export default function RegisterPhysioScreen({ navigation }) {
               label="Experience (years)"
               keyboardType="decimal-pad"
               value={experience}
-              onChangeText={setExperience}
+              onChangeText={(v) => {
+                setExperience(v)
+                patchField('experience', v)
+              }}
               error={fieldErrors.experience}
               placeholder="e.g. 5"
             />
@@ -812,7 +1117,10 @@ export default function RegisterPhysioScreen({ navigation }) {
             <Input
               label="Specialization"
               value={specialization}
-              onChangeText={setSpecialization}
+              onChangeText={(v) => {
+                setSpecialization(v)
+                patchField('specialization', v)
+              }}
               error={fieldErrors.specialization}
               placeholder="e.g. Orthopaedic, sports injury"
             />
@@ -825,7 +1133,7 @@ export default function RegisterPhysioScreen({ navigation }) {
                 options={SERVICE_TYPE_OPTIONS}
                 onSelect={(v) => {
                   setServiceType(v)
-                  setFieldErrors((prev) => ({ ...prev, serviceType: '' }))
+                  patchField('serviceType', v)
                 }}
                 variant="inline"
               />
@@ -835,19 +1143,14 @@ export default function RegisterPhysioScreen({ navigation }) {
             <Input
               label="Areas (comma-separated)"
               value={areas}
-              onChangeText={setAreas}
+              onChangeText={(v) => {
+                setAreas(v)
+                patchField('areas', v)
+              }}
               placeholder="e.g. Guwahati, Beltola"
               error={fieldErrors.areas}
             />
-            <View style={{ height: 12 }} />
-            <Input
-              label="Fee per session (₹)"
-              keyboardType="decimal-pad"
-              value={feeMin}
-              onChangeText={setFeeMin}
-              error={fieldErrors.feeMin}
-              placeholder="e.g. 800"
-            />
+            <EarningsEstimatorWidget />
           </Card>
         )}
 
@@ -855,45 +1158,33 @@ export default function RegisterPhysioScreen({ navigation }) {
           <Card padding="lg" style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Documents</Text>
             <Text style={styles.help}>PDF or image, max 2MB each.</Text>
+            <DocumentSecurityWidget />
             <View style={{ height: 12 }} />
             <DocRow
-              title="Qualification certificate"
+              title="BPT/MPT pass certificate"
               subtitle="Degree or marksheet."
               asset={fCertificate}
               error={fieldErrors.certificate}
-              onPick={() => pickDoc('Qualification certificate', setFCertificate)}
+              onPick={() => pickDoc('BPT/MPT pass certificate', setFCertificate, false, 'certificate')}
             />
             <View style={{ height: 16 }} />
-            <DocRow
-              title="Government ID"
-              subtitle="Clear photo or PDF."
-              asset={fIdProof}
-              error={fieldErrors.idProof || fieldErrors.idProofType}
-              onPick={() => pickDoc('ID proof', setFIdProof)}
+            <MultiInternshipDocRow
+              assets={fInternships}
+              error={fieldErrors.internshipCertificate}
+              onAdd={addInternshipCertificates}
+              onRemove={removeInternshipCertificate}
             />
-            <View style={{ marginBottom: 12 }}>
-              <DropdownField
-                label="ID type"
-                value={idProofType}
-                placeholder="Select ID type"
-                options={ID_PROOF_TYPE_OPTIONS}
-                onSelect={(v) => {
-                  setIdProofType(v)
-                  setFieldErrors((prev) => ({ ...prev, idProofType: '', idProof: '' }))
-                }}
-                variant="inline"
-              />
-              {fieldErrors.idProofType || fieldErrors.idProof ? (
-                <Text style={styles.fieldErr}>{fieldErrors.idProofType || fieldErrors.idProof}</Text>
-              ) : null}
-            </View>
             <View style={{ height: 16 }} />
-            <DocRow
-              title="Professional registration"
-              subtitle="State council document."
-              asset={fRegCert}
-              error={fieldErrors.registrationCertificate}
-              onPick={() => pickDoc('Registration certificate', setFRegCert)}
+            <GovtIdDocumentSection
+              idProofType={idProofType}
+              onSelectIdType={(v) => {
+                setIdProofType(v)
+                patchField('idProofType', v)
+              }}
+              idProofAsset={fIdProof}
+              onPickIdProof={() => pickDoc('GOVERNMENT ID', setFIdProof, false, 'idProof')}
+              error={{ idProofType: fieldErrors.idProofType, idProof: fieldErrors.idProof }}
+              useDropdown
             />
             <View style={{ height: 16 }} />
             <DocRow
@@ -901,21 +1192,16 @@ export default function RegisterPhysioScreen({ navigation }) {
               subtitle="Face visible next to same ID."
               asset={fSelfie}
               error={fieldErrors.selfieWithId}
-              onPick={() => pickDoc('Selfie with ID', setFSelfie)}
+              onPick={() => pickDoc('Selfie with ID', setFSelfie, false, 'selfieWithId')}
             />
             <View style={{ height: 16 }} />
             <DocRow
-              title="Internship certificate (optional)"
-              asset={fInternship}
-              error={fieldErrors.internshipCertificate}
-              onPick={() => pickDoc('Internship certificate', setFInternship)}
-            />
-            <View style={{ height: 16 }} />
-            <DocRow
-              title="Council certificate (optional)"
-              asset={fCouncil}
-              error={fieldErrors.councilRegistrationCertificate}
-              onPick={() => pickDoc('Council registration certificate', setFCouncil)}
+              title="NCAHP/IAP registration certificate"
+              subtitle="If registered, upload your certificate."
+              asset={fRegCert}
+              error={fieldErrors.registrationCertificate}
+              onPick={() => pickDoc('NCAHP/IAP registration certificate', setFRegCert, false, 'registrationCertificate')}
+              isOptional
             />
             <View style={{ height: 20 }} />
             <Text style={styles.sectionTitle}>Qualification declaration</Text>
@@ -938,25 +1224,50 @@ export default function RegisterPhysioScreen({ navigation }) {
 
         {step === 5 && (
           <Card padding="lg" style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Review & submit</Text>
-            <View style={{ height: 12 }} />
-            <ReviewLine label="Phone" value={normalizeIndianPhone(phone) || '—'} />
-            <ReviewLine label="Name" value={name} />
-            <ReviewLine label="Email" value={email} />
-            <ReviewLine label="Specialization" value={specialization} />
-            <ReviewLine label="Experience" value={experience !== '' ? `${experience} yrs` : '—'} />
-            <ReviewLine
-              label="Fee / session"
-              value={feeMin === '' ? '—' : formatPhysioSessionFeeLabel({ pricePerSession: Number(feeMin) })}
-            />
-            <ReviewLine label="Coverage coords" value={coordsReviewStr} />
-            <Text style={styles.help}>
-              Submitting creates your account in pending status until an admin approves you.
-            </Text>
+            <Text style={styles.sectionTitle}>Review details</Text>
+            <Text style={styles.help}>Verify your application details before submitting.</Text>
             <View style={{ height: 16 }} />
+            
+            <Text style={styles.reviewSectionHeader}>BASIC INFO</Text>
+            <ReviewLine label="Phone" value={normalizeIndianPhone(phone) || '—'} />
+            <ReviewLine label="Full name" value={formatPhysioDisplayName(name) || '—'} />
+            <ReviewLine label="Email" value={email || '—'} />
+            <ReviewLine label="DOB" value={dob || '—'} />
+            <ReviewLine label="Gender" value={gender ? (gender.charAt(0).toUpperCase() + gender.slice(1)) : '—'} />
+            <View style={{ height: 16 }} />
+            <Text style={styles.reviewSectionHeader}>PROFESSIONAL INFO</Text>
+            <ReviewLine label="Degree" value={degree || '—'} />
+            <ReviewLine label="University" value={university || '—'} />
+            <ReviewLine label="Passing year" value={year || '—'} />
+            <ReviewLine label="Specialization" value={specialization || '—'} />
+            <ReviewLine label="Experience" value={experience !== '' ? `${experience} yrs` : '—'} />
+            <ReviewLine label="Coverage" value={location || '—'} />
+            <ReviewLine label="Coverage on map" value={coveragePinned ? 'Set' : 'Not set'} />
+            
+            <View style={{ height: 16 }} />
+            <Text style={styles.reviewSectionHeader}>ATTACHED DOCUMENTS</Text>
+            <View style={styles.reviewDocsGrid}>
+              <ReviewDocBadge label="Passport photo" present={Boolean(avatarAsset)} name={avatarAsset?.name} />
+              <ReviewDocBadge label="BPT/MPT Cert" present={Boolean(fCertificate)} name={fCertificate?.name} />
+              <ReviewDocBadge label="Internship" present={fInternships.length > 0} name={`${fInternships.length} file(s)`} />
+              <ReviewDocBadge label="Govt ID" present={Boolean(fIdProof)} name={fIdProof?.name} />
+              <ReviewDocBadge label="Selfie with ID" present={Boolean(fSelfie)} name={fSelfie?.name} />
+              <ReviewDocBadge label="NCAHP/IAP (Opt)" present={Boolean(fRegCert)} name={fRegCert?.name} isOptional />
+            </View>
+            
+            <View style={{ height: 20 }} />
+            <View style={styles.infoBanner}>
+              <Ionicons name="information-circle-outline" size={18} color={colors.brand} />
+              <Text style={styles.infoBannerText}>
+                Your application will be reviewed by an administrator. This usually takes 24-48 hours.
+              </Text>
+            </View>
+            
+            <View style={{ height: 20 }} />
             <Button title={saving ? 'Submitting…' : 'Submit application'} onPress={handleSubmit} loading={saving} />
           </Card>
         )}
+        </Animated.View>
 
       </ScrollView>
 
@@ -1012,7 +1323,7 @@ export default function RegisterPhysioScreen({ navigation }) {
                 themeVariant="light"
                 onChange={(_, date) => date && setPickerTempDate(date)}
                 maximumDate={maxDob}
-                minimumDate={DOB_MIN}
+                minimumDate={DOB_PICKER_MIN}
               />
             </View>
           </View>
@@ -1029,9 +1340,19 @@ export default function RegisterPhysioScreen({ navigation }) {
             if (date) applyPickedDob(date)
           }}
           maximumDate={maxDob}
-          minimumDate={DOB_MIN}
+          minimumDate={DOB_PICKER_MIN}
         />
       ) : null}
+
+      <MapPickerModal
+        visible={mapPickerOpen}
+        pin={mapPin}
+        geoBusy={locating}
+        onClose={() => setMapPickerOpen(false)}
+        onPick={setMapPin}
+        onUseMyLocation={useMyLocationForMapPicker}
+        onUseLocation={applyMapPin}
+      />
     </KeyboardAvoidingView>
   )
 }
@@ -1047,6 +1368,38 @@ function ReviewLine({ label, value }) {
   )
 }
 
+function ReviewDocBadge({ label, present, name, isOptional }) {
+  return (
+    <View style={[styles.reviewDocBadge, present ? styles.reviewDocBadgeReady : styles.reviewDocBadgeEmpty]}>
+      <Ionicons 
+        name={present ? "checkmark-circle" : (isOptional ? "remove-circle" : "alert-circle")} 
+        size={14} 
+        color={present ? colors.success : (isOptional ? colors.textTertiary : colors.danger)} 
+      />
+      <View style={styles.reviewDocBadgeTextCol}>
+        <Text style={styles.reviewDocBadgeLabel}>{label}</Text>
+        <Text style={styles.reviewDocBadgeFileName} numberOfLines={1}>
+          {present ? (name || 'Attached') : (isOptional ? 'Not attached' : 'Required')}
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+function DocumentSecurityWidget() {
+  return (
+    <View style={styles.securityWidget}>
+      <Ionicons name="shield-checkmark" size={20} color={colors.brand} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.securityTitle}>Secure Document Upload</Text>
+        <Text style={styles.securityDesc}>
+          Credentials are encrypted and kept strictly confidential. Only verified administrators have clearance to view files.
+        </Text>
+      </View>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.canvas },
   scrollPad: { paddingHorizontal: 16, paddingTop: 10 },
@@ -1056,81 +1409,222 @@ const styles = StyleSheet.create({
   lead: { marginTop: 6, fontFamily: font.regular, fontSize: type.sm, color: colors.inkMuted, lineHeight: leading.sm },
   stepRow: { flexDirection: 'row', gap: 10, paddingVertical: 6, paddingRight: 8, alignItems: 'center' },
   stepChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: r.full, borderWidth: 1, minHeight: 38, flexShrink: 0, justifyContent: 'center' },
-  stepChipOff: { backgroundColor: colors.white, borderColor: colors.borderSubtle },
-  stepChipOn: { backgroundColor: colors.brand, borderColor: colors.brand, shadowColor: colors.brand, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 3 },
+  stepChipOff: { backgroundColor: 'rgba(255, 255, 255, 0.45)', borderColor: 'rgba(13, 148, 136, 0.15)' },
+  stepChipOn: { backgroundColor: colors.brand, borderColor: colors.brand, shadowColor: colors.brand, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
   stepChipText: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.inkMuted },
   stepChipTextOn: { color: colors.white },
-  sectionCard: { marginBottom: 10 },
-  sectionTitle: { fontFamily: font.bold, fontSize: type.base, color: colors.ink },
-  help: { marginTop: 6, fontFamily: font.regular, fontSize: type.xs, color: colors.textTertiary, lineHeight: leading.xs },
+  sectionCard: {
+    marginBottom: 16,
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    elevation: 4,
+  },
+  sectionTitle: { fontFamily: font.bold, fontSize: type.lg, color: colors.ink },
+  help: { marginTop: 4, fontFamily: font.regular, fontSize: type.sm, color: colors.textSecondary, lineHeight: leading.sm },
   pickLabel: { marginBottom: 6, fontFamily: font.semiBold, fontSize: type.sm, color: colors.inkMuted },
   pickField: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    borderRadius: r.xl,
-    paddingHorizontal: 12,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: colors.white,
-    minHeight: 44,
+    backgroundColor: 'rgba(241, 245, 249, 0.5)',
+    minHeight: 46,
   },
   pickFieldErr: { borderColor: colors.danger },
-  pickFieldText: { fontFamily: font.regular, fontSize: type.sm, color: colors.ink },
+  pickFieldText: { fontFamily: font.regular, fontSize: type.base, color: colors.ink },
   pickFieldTextFlex: { flex: 1 },
   pickFieldIcon: { marginRight: 8 },
   pickPlaceholder: { color: colors.textTertiary },
   textArea: {
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    borderRadius: r.lg,
-    padding: 12,
-    minHeight: 80,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    borderRadius: 14,
+    padding: 14,
+    minHeight: 90,
     textAlignVertical: 'top',
     fontFamily: font.regular,
-    fontSize: type.sm,
+    fontSize: type.base,
     color: colors.ink,
+    backgroundColor: 'rgba(241, 245, 249, 0.5)',
+  },
+  textAreaFocused: {
+    borderColor: colors.brand,
     backgroundColor: colors.white,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
   },
   textAreaErr: { borderColor: colors.danger },
-  coordHint: { marginTop: 6, fontFamily: font.regular, fontSize: type.xs, color: colors.textTertiary },
-  avatar: { width: 80, height: 80, borderRadius: 40, marginBottom: 12, borderWidth: 2, borderColor: colors.borderSubtle },
-  docRow: {
+  mapActionRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  mapActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: colors.canvas,
-    borderRadius: r.xl,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.2)',
+    backgroundColor: colors.white,
   },
-  docTitle: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.ink },
-  docSub: { marginTop: 3, fontFamily: font.regular, fontSize: type.xs, color: colors.textSecondary },
-  docPreviewRow: {
-    marginTop: 8,
+  mapActionBtnDisabled: { opacity: 0.6 },
+  mapActionBtnTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
+  locationReadonly: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    minHeight: 46,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(241, 245, 249, 0.5)',
+  },
+  locationReadonlySet: {
+    borderColor: 'rgba(13, 148, 136, 0.2)',
+    backgroundColor: colors.white,
+  },
+  locationReadonlyErr: { borderColor: colors.danger },
+  locationReadonlyIcon: { marginTop: 1 },
+  locationReadonlyText: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: type.base,
+    color: colors.ink,
+    lineHeight: leading.sm,
+  },
+  locationReadonlyPlaceholder: {
+    color: colors.textTertiary,
+  },
+  avatar: { width: 88, height: 88, borderRadius: 44, marginBottom: 16, borderWidth: 2, borderColor: colors.brandSoft },
+  
+  // Premium DocRow dropzones
+  docRowPremium: {
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  docRowEmpty: {
+    backgroundColor: 'rgba(241, 245, 249, 0.4)',
+    borderColor: 'rgba(13, 148, 136, 0.12)',
+    borderStyle: 'dashed',
+  },
+  docRowUploaded: {
+    backgroundColor: colors.white,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  docRowError: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerBg,
+  },
+  docRowPressed: {
+    opacity: 0.85,
+    backgroundColor: colors.slate100,
+  },
+  docRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  docTitlePremium: { fontFamily: font.bold, fontSize: type.base, color: colors.ink },
+  docSubPremium: { marginTop: 2, fontFamily: font.regular, fontSize: type.xs, color: colors.textSecondary },
+  
+  // Badges
+  badgeSuccess: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.successBg,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  badgeSuccessText: { fontFamily: font.semiBold, fontSize: 10, color: colors.success },
+  badgeOptional: {
+    backgroundColor: colors.slate100,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+  },
+  badgeOptionalText: { fontFamily: font.medium, fontSize: 10, color: colors.slate500 },
+  badgeRequired: {
+    backgroundColor: colors.rose50,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.1)',
+  },
+  badgeRequiredText: { fontFamily: font.semiBold, fontSize: 10, color: colors.danger },
+
+  // Upload previews
+  docPreviewContainer: {
+    marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    backgroundColor: colors.slate50,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate100,
   },
-  docThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: r.md,
+  docThumbPremium: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     backgroundColor: colors.slate100,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
   },
-  docIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: r.md,
-    backgroundColor: colors.teal50,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
+  docIconWrapPremium: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: colors.brandSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  docName: { marginTop: 6, fontFamily: font.regular, fontSize: type.xs, color: colors.textSecondary },
-  docNameInRow: { marginTop: 0, flex: 1, fontSize: type.sm, color: colors.ink },
+  docDetailsCol: {
+    flex: 1,
+  },
+  docNamePremium: { fontFamily: font.medium, fontSize: type.sm, color: colors.ink },
+  tapToReplace: { fontFamily: font.regular, fontSize: 10, color: colors.brand, marginTop: 1 },
+  uploadPromptRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  uploadPromptText: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
+
   declaration: {
     marginTop: 8,
     fontFamily: font.regular,
@@ -1138,10 +1632,10 @@ const styles = StyleSheet.create({
     color: colors.inkMuted,
     lineHeight: leading.sm,
     padding: 12,
-    backgroundColor: colors.slate50,
-    borderRadius: r.lg,
+    backgroundColor: 'rgba(241, 245, 249, 0.4)',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
   },
   checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 14 },
   checkBox: {
@@ -1169,20 +1663,20 @@ const styles = StyleSheet.create({
   },
   errorBannerTitle: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.danger, marginBottom: 6 },
   errorBannerItem: { fontFamily: font.regular, fontSize: type.xs, color: colors.danger, marginTop: 2 },
-  mainCol: { flex: 1 },
+  mainCol: { flex: 1, position: 'relative', overflow: 'hidden' },
   scrollFlex: { flex: 1 },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 12,
-    backgroundColor: colors.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderSubtle,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(13, 148, 136, 0.08)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
     elevation: 4,
   },
   reviewRow: {
@@ -1222,4 +1716,198 @@ const styles = StyleSheet.create({
   },
   modalBtn: { fontFamily: font.medium, fontSize: type.sm, color: colors.textSecondary },
   modalBtnPrimary: { fontFamily: font.bold, color: colors.brand },
+  ambientHeaderGlow: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(162, 240, 239, 0.15)',
+    zIndex: 0,
+  },
+  ambientHeaderGlow2: {
+    position: 'absolute',
+    top: -50,
+    left: '20%',
+    width: '60%',
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(13, 107, 107, 0.04)',
+    zIndex: 0,
+  },
+
+  // Premium progress tracker styles
+  premiumProgressContainer: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 15,
+    elevation: 3,
+    marginBottom: 16,
+  },
+  progressTextRow: {
+    marginBottom: 10,
+  },
+  progressSub: {
+    fontFamily: font.bold,
+    fontSize: 10,
+    color: colors.brand,
+    letterSpacing: 1.2,
+  },
+  progressTitle: {
+    fontFamily: font.bold,
+    fontSize: type.lg,
+    color: colors.ink,
+    marginTop: 2,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.slate200,
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: colors.brand,
+  },
+  miniStepsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  miniStepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.slate100,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniStepDotActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  miniStepDotCompleted: {
+    backgroundColor: colors.brandSoft,
+    borderColor: 'rgba(13, 148, 136, 0.2)',
+  },
+  miniStepText: {
+    fontFamily: font.semiBold,
+    fontSize: type.sm,
+    color: colors.slate400,
+  },
+  miniStepTextActive: {
+    color: colors.white,
+  },
+  miniStepTextCompleted: {
+    color: colors.brand,
+  },
+
+  // Review section header
+  reviewSectionHeader: {
+    fontFamily: font.bold,
+    fontSize: type.sm,
+    color: colors.brand,
+    letterSpacing: 1.0,
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  reviewDocsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 8,
+  },
+  reviewDocBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    width: '48%',
+    minHeight: 44,
+  },
+  reviewDocBadgeReady: {
+    backgroundColor: colors.successBg,
+    borderColor: 'rgba(16, 185, 129, 0.12)',
+  },
+  reviewDocBadgeEmpty: {
+    backgroundColor: colors.slate50,
+    borderColor: colors.slate200,
+  },
+  reviewDocBadgeTextCol: {
+    flex: 1,
+  },
+  reviewDocBadgeLabel: {
+    fontFamily: font.semiBold,
+    fontSize: 9,
+    color: colors.slate500,
+  },
+  reviewDocBadgeFileName: {
+    fontFamily: font.regular,
+    fontSize: type.xs,
+    color: colors.ink,
+    marginTop: 1,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.teal50,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+  },
+  infoBannerText: {
+    flex: 1,
+    fontFamily: font.medium,
+    fontSize: type.sm,
+    color: colors.teal800,
+    lineHeight: leading.sm,
+  },
+
+  // Security widget styles
+  securityWidget: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.slate50,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  securityTitle: {
+    fontFamily: font.bold,
+    fontSize: type.sm,
+    color: colors.ink,
+  },
+  securityDesc: {
+    fontFamily: font.regular,
+    fontSize: type.xs,
+    color: colors.textSecondary,
+    lineHeight: 14,
+    marginTop: 1,
+  },
 })

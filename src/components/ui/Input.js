@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo, useState, forwardRef, useRef, useImperativeHandle } from 'react'
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { colors } from '../../theme/colors'
@@ -8,7 +8,7 @@ import { signupType, signupLeading } from '../../theme/signupTypography'
 import { font, type } from '../../theme/typography'
 import { r } from '../../theme/radius'
 
-function Input({
+const Input = forwardRef(({
   label,
   error,
   hint,
@@ -17,9 +17,15 @@ function Input({
   inputStyle,
   variant = 'default',
   signupMutedBg = false,
+  prefix,
+  suffix,
   ...props
-}) {
+}, ref) => {
+  const localRef = useRef(null)
+  useImperativeHandle(ref, () => localRef.current)
+
   const isPasswordField = props.secureTextEntry === true
+  const hasAffixes = Boolean(prefix || suffix)
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [focused, setFocused] = useState(false)
   const isSignup = variant === 'signup'
@@ -36,27 +42,58 @@ function Input({
 
   const autoFillProps = useMemo(() => {
     const extra = {}
-    if (isPasswordField) {
+    if (isPasswordField && props.textContentType !== 'none') {
       extra.textContentType = props.textContentType || 'password'
       extra.autoComplete = props.autoComplete || 'password'
-      extra.importantForAutofill = props.importantForAutofill || 'yes'
+      if (props.importantForAutofill === undefined) extra.importantForAutofill = 'yes'
       if (props.autoCorrect === undefined) {
         extra.autoCorrect = false
       }
     } else if (
-      props.keyboardType === 'phone-pad' ||
-      String(label || '').toLowerCase().includes('mobile') ||
-      String(label || '').toLowerCase().includes('phone')
+      props.textContentType !== 'none' &&
+      (props.textContentType === 'name' ||
+        (String(label || '').toLowerCase().includes('name') &&
+          !String(label || '').toLowerCase().includes('phone')))
+    ) {
+      extra.textContentType = props.textContentType || 'name'
+      extra.autoComplete = props.autoComplete || 'name'
+      if (props.importantForAutofill === undefined) extra.importantForAutofill = 'yes'
+      if (props.autoCorrect === undefined) extra.autoCorrect = false
+    } else if (
+      props.textContentType !== 'none' &&
+      (props.keyboardType === 'phone-pad' ||
+        String(label || '').toLowerCase().includes('mobile') ||
+        String(label || '').toLowerCase().includes('phone'))
     ) {
       extra.textContentType = props.textContentType || 'telephoneNumber'
       extra.autoComplete = props.autoComplete || 'tel'
-      extra.importantForAutofill = props.importantForAutofill || 'yes'
-      if (props.autoCorrect === undefined) {
-        extra.autoCorrect = false
-      }
+      if (props.importantForAutofill === undefined) extra.importantForAutofill = 'yes'
+      if (props.autoCorrect === undefined) extra.autoCorrect = false
     }
     return extra
   }, [isPasswordField, label, props.textContentType, props.autoComplete, props.importantForAutofill, props.autoCorrect, props.keyboardType])
+
+  const field = (
+    <TextInput
+      ref={localRef}
+      placeholderTextColor={placeholderColor}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={[
+        hasAffixes ? styles.inputAffixField : styles.input,
+        isSignup && !hasAffixes && styles.inputSignup,
+        isSignup && signupMutedBg && !hasAffixes && styles.inputSignupMuted,
+        isLogin && !hasAffixes && styles.inputLogin,
+        !hasAffixes && focused && focusStyle,
+        !hasAffixes && error && styles.inputErr,
+        isPasswordField && !hasAffixes && (isSignup || isLogin ? styles.inputWithEyeSignup : styles.inputWithEye),
+        inputStyle,
+      ]}
+      {...autoFillProps}
+      {...props}
+      secureTextEntry={secureTextEntry}
+    />
+  )
 
   return (
     <View style={style}>
@@ -73,46 +110,56 @@ function Input({
         </Text>
       ) : null}
       {description && isSignup ? <Text style={styles.descriptionSignup}>{description}</Text> : null}
-      <View style={styles.inputWrap}>
-        <TextInput
-          placeholderTextColor={placeholderColor}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={[
-            styles.input,
-            isSignup && styles.inputSignup,
-            isSignup && signupMutedBg && styles.inputSignupMuted,
-            isLogin && styles.inputLogin,
-            focused && focusStyle,
-            error && styles.inputErr,
-            isPasswordField && (isSignup || isLogin ? styles.inputWithEyeSignup : styles.inputWithEye),
-            inputStyle,
-          ]}
-          {...autoFillProps}
-          {...props}
-          secureTextEntry={secureTextEntry}
-        />
-        {isPasswordField ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
-            hitSlop={8}
-            style={[styles.eyeBtn, eyeSlot]}
-            onPress={() => setPasswordVisible((v) => !v)}
+      {hasAffixes ? (
+        <View style={styles.inputWrap}>
+          <View
+            style={[
+              styles.inputAffixRow,
+              isSignup && styles.inputSignup,
+              isSignup && signupMutedBg && styles.inputSignupMuted,
+              isLogin && styles.inputLogin,
+              focused && focusStyle,
+              error && styles.inputErr,
+            ]}
           >
-            <Ionicons
-              name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
-              size={18}
-              color={isSignup ? su.inkMuted : isLogin ? lu.inkMuted : colors.textSecondary}
-            />
-          </Pressable>
-        ) : null}
-      </View>
+            {prefix ? (
+              <Pressable onPress={() => localRef.current?.focus()} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.inputAffixText}>{prefix}</Text>
+              </Pressable>
+            ) : null}
+            {field}
+            {suffix ? (
+              <Pressable onPress={() => localRef.current?.focus()} hitSlop={8} accessibilityRole="button">
+                <Text style={[styles.inputAffixText, styles.inputAffixTextSuffix]}>{suffix}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : (
+        <Pressable onPress={() => localRef.current?.focus()} style={styles.inputWrap}>
+          {field}
+          {isPasswordField ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+              hitSlop={8}
+              style={[styles.eyeBtn, eyeSlot]}
+              onPress={() => setPasswordVisible((v) => !v)}
+            >
+              <Ionicons
+                name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                size={18}
+                color={isSignup ? su.inkMuted : isLogin ? lu.inkMuted : colors.textSecondary}
+              />
+            </Pressable>
+          ) : null}
+        </Pressable>
+      )}
       {hint && !error ? <Text style={styles.hint}>{hint}</Text> : null}
       {error ? <Text style={[styles.err, isLogin && styles.errLogin]}>{error}</Text> : null}
     </View>
   )
-}
+})
 
 const styles = StyleSheet.create({
   label: {
@@ -141,6 +188,37 @@ const styles = StyleSheet.create({
     color: su.inkMuted,
   },
   inputWrap: { position: 'relative' },
+  inputAffixRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
+  },
+  inputAffixField: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: font.regular,
+    fontSize: type.base,
+    color: colors.textPrimary,
+  },
+  inputAffixText: {
+    fontFamily: font.semiBold,
+    fontSize: type.base,
+    color: colors.textSecondary,
+    marginRight: 6,
+  },
+  inputAffixTextSuffix: {
+    marginRight: 0,
+    marginLeft: 6,
+  },
   input: {
     minHeight: 46,
     paddingVertical: 10,

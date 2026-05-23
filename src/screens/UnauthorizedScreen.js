@@ -36,7 +36,13 @@ export default function UnauthorizedScreen({ navigation }) {
       <View style={styles.wrap}>
         <Text style={styles.title}>Unauthorized</Text>
         <Text style={styles.sub}>You don&apos;t have access to that area.</Text>
-        <Button title="Go to sign in" onPress={() => navigation.replace('Login')} />
+        <Button
+          title="Log out and Sign in"
+          onPress={async () => {
+            await clearSession()
+            navigation.replace('Login')
+          }}
+        />
       </View>
     )
   }
@@ -51,7 +57,14 @@ export default function UnauthorizedScreen({ navigation }) {
       {envHint ? <Text style={styles.hint}>{envHint}</Text> : null}
       <Button title="Open web sign-in" variant="primary" onPress={() => openWebLoginInBrowser()} />
       <View style={{ height: 10 }} />
-      <Button title="Go to sign in" variant="outline" onPress={() => navigation.replace('Login')} />
+      <Button
+        title="Log out and Sign in"
+        variant="outline"
+        onPress={async () => {
+          await clearSession()
+          navigation.replace('Login')
+        }}
+      />
     </View>
   )
 }

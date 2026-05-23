@@ -212,57 +212,67 @@ export default function PhysioBookingsScreen({ navigation }) {
 
   if (loadError) {
     return (
-      <FlatList
-        data={[{ key: 'err' }]}
-        style={styles.root}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
-        renderItem={() => (
-          <View style={styles.errorCard}>
-            <View style={styles.errorIconWrap}>
-              <Ionicons name="warning-outline" size={24} color={colors.warning} />
+      <View style={styles.container}>
+        <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+        <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
+        <FlatList
+          data={[{ key: 'err' }]}
+          style={[styles.root, { backgroundColor: 'transparent' }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
+          renderItem={() => (
+            <View style={styles.errorCard}>
+              <View style={styles.errorIconWrap}>
+                <Ionicons name="warning-outline" size={24} color={colors.warning} />
+              </View>
+              <Text style={styles.errorTitle}>{loadError}</Text>
+              {(errorCode === 'PHYSIO_PENDING' || errorCode === 'PROFILE_INCOMPLETE') && (
+                <Pressable
+                  style={styles.errorBtn}
+                  onPress={() => navigation.getParent()?.getParent()?.navigate('PhysioOnboarding')}
+                >
+                  <Text style={styles.errorBtnTxt}>Complete profile setup</Text>
+                </Pressable>
+              )}
             </View>
-            <Text style={styles.errorTitle}>{loadError}</Text>
-            {(errorCode === 'PHYSIO_PENDING' || errorCode === 'PROFILE_INCOMPLETE') && (
-              <Pressable
-                style={styles.errorBtn}
-                onPress={() => navigation.getParent()?.getParent()?.navigate('PhysioOnboarding')}
-              >
-                <Text style={styles.errorBtnTxt}>Complete profile setup</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-      />
+          )}
+        />
+      </View>
     )
   }
 
   if (bookings.length === 0) {
     return (
-      <FlatList
-        data={[{ key: 'empty' }]}
-        style={styles.root}
-        contentContainerStyle={styles.listPad}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
-        ListHeaderComponent={header}
-        renderItem={() => (
-          <View style={styles.emptyBox}>
-            <View style={styles.emptyIconWrap}>
-              <Ionicons name="calendar-outline" size={30} color={colors.slate300} />
+      <View style={styles.container}>
+        <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+        <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
+        <FlatList
+          data={[{ key: 'empty' }]}
+          style={[styles.root, { backgroundColor: 'transparent' }]}
+          contentContainerStyle={styles.listPad}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
+          ListHeaderComponent={header}
+          renderItem={() => (
+            <View style={styles.emptyBox}>
+              <View style={styles.emptyIconWrap}>
+                <Ionicons name="calendar-outline" size={30} color={colors.slate300} />
+              </View>
+              <Text style={styles.emptyTitle}>No bookings yet</Text>
+              <Text style={styles.emptySub}>Assigned sessions will appear here.</Text>
             </View>
-            <Text style={styles.emptyTitle}>No bookings yet</Text>
-            <Text style={styles.emptySub}>Assigned sessions will appear here.</Text>
-          </View>
-        )}
-      />
+          )}
+        />
+      </View>
     )
   }
 
   if (displayBookings.length === 0) {
     return (
-      <>
+      <View style={styles.container}>
+        <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+        <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
         <FlatList
           data={[{ key: 'empty2' }]}
-          style={styles.root}
+          style={[styles.root, { backgroundColor: 'transparent' }]}
           contentContainerStyle={styles.listPad}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
           ListHeaderComponent={header}
@@ -280,16 +290,18 @@ export default function PhysioBookingsScreen({ navigation }) {
           setDraft={setFilterDraft}
           onClose={() => { setFilters({ ...filterDraft }); setFilterOpen(false) }}
         />
-      </>
+      </View>
     )
   }
 
   if (view === 'calendar') {
     return (
-      <>
+      <View style={styles.container}>
+        <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+        <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
         <ScrollView
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
-          style={styles.root}
+          style={[styles.root, { backgroundColor: 'transparent' }]}
           contentContainerStyle={styles.listPad}
         >
           {header}
@@ -304,16 +316,18 @@ export default function PhysioBookingsScreen({ navigation }) {
           setDraft={setFilterDraft}
           onClose={() => { setFilters({ ...filterDraft }); setFilterOpen(false) }}
         />
-      </>
+      </View>
     )
   }
 
   return (
-    <>
+    <View style={styles.container}>
+      <View style={styles.ambientHeaderGlow} pointerEvents="none" />
+      <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
       <FlatList
         data={displayBookings}
         keyExtractor={(item) => String(item._id)}
-        style={styles.root}
+        style={[styles.root, { backgroundColor: 'transparent' }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} />}
         ListHeaderComponent={header}
         contentContainerStyle={styles.listPad}
@@ -404,7 +418,7 @@ export default function PhysioBookingsScreen({ navigation }) {
         setDraft={setFilterDraft}
         onClose={() => { setFilters({ ...filterDraft }); setFilterOpen(false) }}
       />
-    </>
+    </View>
   )
 }
 
@@ -423,9 +437,9 @@ function StatPill({ icon, value, label, color }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas },
+  root: { flex: 1, backgroundColor: 'transparent' },
   listPad: { paddingHorizontal: 16, paddingBottom: 32 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.canvas },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e8f8f6' },
 
   headerBlock: { paddingTop: 8, paddingBottom: 12 },
   bannerWrap: { marginBottom: 10 },
@@ -434,17 +448,17 @@ const styles = StyleSheet.create({
   statsStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     paddingVertical: 12,
     paddingHorizontal: 6,
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
     elevation: 1,
   },
   statPill: {
@@ -466,21 +480,21 @@ const styles = StyleSheet.create({
   statTextWrap: { minWidth: 0, flexShrink: 1 },
   statValue: { fontFamily: font.bold, fontSize: type.sm, color: colors.textPrimary, lineHeight: 17 },
   statLabel: { fontFamily: font.regular, fontSize: 8, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.3 },
-  statsDivider: { width: 1, height: 28, backgroundColor: colors.borderSubtle },
+  statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(13, 148, 136, 0.08)' },
 
   // Toolbar
   toolbar: {
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     padding: 12,
     gap: 10,
     marginBottom: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
     elevation: 1,
   },
   searchWrap: {
@@ -488,10 +502,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     borderRadius: 10,
     paddingHorizontal: 10,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
     minHeight: 38,
   },
   searchInput: {
@@ -509,10 +523,10 @@ const styles = StyleSheet.create({
   },
   segWrap: {
     flexDirection: 'row',
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     padding: 2,
     gap: 2,
   },
@@ -525,12 +539,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   segBtnOn: {
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     borderWidth: 1,
-    borderColor: colors.brandSoft,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 1,
   },
@@ -546,8 +560,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.white,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
   sortTxt: { fontFamily: font.medium, fontSize: type.xs, color: colors.slate500 },
   filterBtn: {
@@ -558,8 +572,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.white,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
   filterBtnActive: {
     backgroundColor: colors.brand,
@@ -578,17 +592,17 @@ const styles = StyleSheet.create({
   // Booking card
   card: {
     flexDirection: 'row',
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     marginBottom: 10,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardPressed: { opacity: 0.92 },
   cardAccent: { width: 4, alignSelf: 'stretch', flexShrink: 0 },
@@ -638,7 +652,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderSubtle,
+    borderTopColor: 'rgba(13, 148, 136, 0.08)',
   },
   startBtn: {
     flexDirection: 'row',
@@ -696,11 +710,39 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: colors.slate50,
+    backgroundColor: 'rgba(13, 148, 136, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
   },
   emptyTitle: { fontFamily: font.semiBold, fontSize: type.base, color: colors.textSecondary },
   emptySub: { fontFamily: font.regular, fontSize: type.sm, color: colors.textTertiary, textAlign: 'center', lineHeight: leading.sm },
+
+  // New backgrounds/glows
+  container: {
+    flex: 1,
+    backgroundColor: '#e8f8f6',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  ambientHeaderGlow: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(162, 240, 239, 0.15)',
+    zIndex: 0,
+  },
+  ambientHeaderGlow2: {
+    position: 'absolute',
+    top: -50,
+    left: '20%',
+    width: '60%',
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(13, 107, 107, 0.04)',
+    zIndex: 0,
+  },
 })

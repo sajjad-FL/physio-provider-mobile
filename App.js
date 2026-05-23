@@ -28,6 +28,8 @@ export default function App() {
     Inter_700Bold,
   })
 
+  console.log('[App.js] fontsLoaded:', fontsLoaded)
+
   if (!fontsLoaded) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.canvas }}>

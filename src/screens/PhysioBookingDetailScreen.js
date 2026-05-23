@@ -169,6 +169,7 @@ const SessionNoteEditor = memo(function SessionNoteEditor({ row, onSaved }) {
   const [text, setText] = useState(row.notes?.text || '')
   const [busy, setBusy] = useState(false)
   const [meta, setMeta] = useState({ updatedAt: row.notes?.updatedAt })
+  const [focused, setFocused] = useState(false)
 
   async function save() {
     if (!row.sessionId) {
@@ -213,7 +214,9 @@ const SessionNoteEditor = memo(function SessionNoteEditor({ row, onSaved }) {
         </Pressable>
       </View>
       <TextInput
-        style={styles.ta}
+        style={[styles.ta, focused && styles.taFocused]}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         multiline
         value={text}
         onChangeText={setText}
@@ -250,6 +253,9 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
   const [recordBusy, setRecordBusy] = useState(false)
   const [notesExpanded, setNotesExpanded] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
+  const [noShowFocused, setNoShowFocused] = useState(false)
+  const [recordAmountFocused, setRecordAmountFocused] = useState(false)
+  const [recordNoteFocused, setRecordNoteFocused] = useState(false)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -929,7 +935,9 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
               </View>
               <Text style={styles.inputLabel}>Reason (optional)</Text>
               <TextInput
-                style={styles.ta}
+                style={[styles.ta, noShowFocused && styles.taFocused]}
+                onFocus={() => setNoShowFocused(true)}
+                onBlur={() => setNoShowFocused(false)}
                 value={noShowReason}
                 onChangeText={setNoShowReason}
                 multiline
@@ -978,7 +986,9 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
               </View>
               <Text style={styles.inputLabel}>Amount (₹)</Text>
               <TextInput
-                style={styles.inp}
+                style={[styles.inp, recordAmountFocused && styles.inpFocused]}
+                onFocus={() => setRecordAmountFocused(true)}
+                onBlur={() => setRecordAmountFocused(false)}
                 keyboardType="decimal-pad"
                 value={recordAmount}
                 onChangeText={setRecordAmount}
@@ -986,7 +996,16 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 placeholderTextColor={colors.slate400}
               />
               <Text style={[styles.inputLabel, { marginTop: 12 }]}>Note (optional)</Text>
-              <TextInput style={styles.ta} value={recordNote} onChangeText={setRecordNote} multiline placeholder="Cash / UPI reference…" placeholderTextColor={colors.slate400} />
+              <TextInput
+                style={[styles.ta, recordNoteFocused && styles.taFocused]}
+                onFocus={() => setRecordNoteFocused(true)}
+                onBlur={() => setRecordNoteFocused(false)}
+                value={recordNote}
+                onChangeText={setRecordNote}
+                multiline
+                placeholder="Cash / UPI reference…"
+                placeholderTextColor={colors.slate400}
+              />
               {recordErr ? <Text style={styles.errSm}>{recordErr}</Text> : null}
               <View style={styles.modalActions}>
                 <Pressable
@@ -1165,7 +1184,12 @@ const PlanKV = memo(function PlanKV({ label, value, highlight }) {
 })
 
 const styles = StyleSheet.create({
-  screenRoot: { flex: 1, backgroundColor: colors.canvas },
+  screenRoot: {
+    flex: 1,
+    backgroundColor: colors.canvas,
+    position: 'relative',
+    overflow: 'hidden',
+  },
   sectionGap: { height: 10 },
   footerCard: { marginTop: 10 },
 
@@ -1175,31 +1199,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingBottom: 14,
-    backgroundColor: colors.brand,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(13, 148, 136, 0.08)',
     gap: 10,
   },
   backBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     flexShrink: 0,
   },
   customHeaderCenter: { flex: 1, minWidth: 0 },
   customHeaderTitle: {
     fontFamily: font.bold,
     fontSize: type.base,
-    color: colors.white,
+    color: colors.textPrimary,
   },
   customHeaderSub: {
     marginTop: 1,
     fontFamily: font.regular,
     fontSize: type.xs,
-    color: 'rgba(255,255,255,0.75)',
+    color: colors.textSecondary,
   },
   customHeaderSpacer: { width: 34 },
 
@@ -1207,18 +1233,18 @@ const styles = StyleSheet.create({
   heroCard: {
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     marginTop: 8,
-    shadowColor: '#000',
+    shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.03,
     shadowRadius: 8,
-    elevation: 2,
+    elevation: 1,
   },
   heroBand: {
-    backgroundColor: colors.brandHover,
+    backgroundColor: 'rgba(15, 118, 110, 0.9)',
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 16,
@@ -1283,9 +1309,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 13,
-    backgroundColor: colors.teal50,
+    backgroundColor: 'rgba(13, 148, 136, 0.08)',
     borderWidth: 1.5,
-    borderColor: colors.brandSoft,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -1317,7 +1343,7 @@ const styles = StyleSheet.create({
   heroContactBtnOff: { opacity: 0.4 },
   heroContactBtnTxt: { fontFamily: font.semiBold, fontSize: type.xs },
   heroContactBtnTxtOff: { color: colors.slate300 },
-  heroCallBtn: { backgroundColor: colors.teal50, borderColor: colors.brandSoft },
+  heroCallBtn: { backgroundColor: 'rgba(13, 148, 136, 0.08)', borderColor: 'rgba(13, 148, 136, 0.15)' },
   heroCallBtnTxt: { color: colors.brand },
   heroWaBtn: { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' },
   heroWaBtnTxt: { color: '#16a34a' },
@@ -1355,13 +1381,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     maxWidth: '100%',
     borderRadius: 16,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
     elevation: 1,
   },
   tabScrollContent: {
@@ -1398,7 +1424,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 9,
-    backgroundColor: colors.teal50,
+    backgroundColor: 'rgba(13, 148, 136, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -1412,14 +1438,14 @@ const styles = StyleSheet.create({
   // ── Section cards ────────────────────────────────
   sectionCard: {
     borderRadius: 16,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
     elevation: 1,
   },
   notesHeaderPress: { marginBottom: 4 },
@@ -1431,9 +1457,9 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 12,
     borderRadius: 12,
-    backgroundColor: colors.teal50,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
     borderWidth: 1,
-    borderColor: colors.brandSoft,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     marginBottom: 12,
   },
   physioSelfIconWrap: {
@@ -1448,9 +1474,9 @@ const styles = StyleSheet.create({
   issueBox: {
     padding: 12,
     borderRadius: 12,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.4)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
   },
   issue: { marginTop: 6, fontFamily: font.regular, fontSize: type.sm, color: colors.slate700, lineHeight: 18 },
 
@@ -1480,7 +1506,7 @@ const styles = StyleSheet.create({
   },
   subSectionRule: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.borderSubtle,
+    backgroundColor: 'rgba(13, 148, 136, 0.08)',
     marginVertical: 14,
   },
   recordCollectionBtn: {
@@ -1511,9 +1537,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.4)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
   },
   noteEditorHead: {
     flexDirection: 'row',
@@ -1564,7 +1590,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
+    borderBottomColor: 'rgba(13, 148, 136, 0.08)',
   },
   kvRowLast: { borderBottomWidth: 0 },
   kvK: { fontFamily: font.regular, fontSize: type.sm, color: colors.textSecondary },
@@ -1593,7 +1619,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     padding: 20,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.15,
@@ -1635,7 +1661,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     backgroundColor: colors.white,
   },
   modalCancelTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.textPrimary },
@@ -1690,15 +1716,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.canvas,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
   rescheduleDateTapTxt: { flex: 1, fontFamily: font.semiBold, fontSize: type.base, color: colors.textPrimary },
 
   // ── Misc ──────────────────────────────────────────
-  scroll: { flex: 1, backgroundColor: colors.canvas },
-  pad: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 8, backgroundColor: colors.canvas },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: colors.canvas },
+  scroll: { flex: 1, backgroundColor: 'transparent' },
+  pad: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 8, backgroundColor: 'transparent' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: 'transparent' },
   errorIconWrap: {
     width: 56,
     height: 56,
@@ -1714,7 +1740,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     backgroundColor: colors.white,
   },
   backBtnOutlineTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.textPrimary },
@@ -1725,7 +1751,7 @@ const styles = StyleSheet.create({
   errSm: { marginTop: 8, fontFamily: font.semiBold, fontSize: type.xs, color: colors.danger },
   ta: {
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     borderRadius: 12,
     padding: 12,
     minHeight: 64,
@@ -1733,31 +1759,39 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: type.sm,
     color: colors.textPrimary,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
   inp: {
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     borderRadius: 12,
     padding: 12,
     fontFamily: font.regular,
     fontSize: type.sm,
     color: colors.textPrimary,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
-  sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderSubtle, marginVertical: 10 },
+  taFocused: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: colors.brand,
+  },
+  inpFocused: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderColor: colors.brand,
+  },
+  sep: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(13, 148, 136, 0.08)', marginVertical: 10 },
 
   // ── Plan tab ─────────────────────────────────────
   planPendingCard: {
     borderRadius: 16,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
     borderColor: colors.warningBorder,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
     elevation: 1,
   },
   planPendingIconWrap: {
@@ -1787,21 +1821,21 @@ const styles = StyleSheet.create({
   },
   planPendingKVs: {
     borderRadius: 12,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.4)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     overflow: 'hidden',
   },
   planApprovedCard: {
     borderRadius: 16,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
     borderColor: '#bbf7d0',
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
     elevation: 1,
   },
   planApprovedHead: {
@@ -1833,9 +1867,9 @@ const styles = StyleSheet.create({
   },
   planNaCard: {
     borderRadius: 16,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     padding: 32,
     alignItems: 'center',
     gap: 10,
@@ -1853,7 +1887,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
+    borderBottomColor: 'rgba(13, 148, 136, 0.08)',
   },
   planKVLabel: {
     fontFamily: font.regular,
@@ -1869,5 +1903,27 @@ const styles = StyleSheet.create({
     fontFamily: font.bold,
     fontSize: type.base,
     color: colors.brand,
+  },
+
+  // Glows
+  ambientHeaderGlow: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(162, 240, 239, 0.15)',
+    zIndex: 0,
+  },
+  ambientHeaderGlow2: {
+    position: 'absolute',
+    top: -50,
+    left: '20%',
+    width: '60%',
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(13, 107, 107, 0.04)',
+    zIndex: 0,
   },
 })

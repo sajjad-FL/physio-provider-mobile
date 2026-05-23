@@ -39,14 +39,21 @@ export default function PhysioDisputesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.brand} />
+      <View style={styles.container}>
+        <View style={styles.ambientHeaderGlow} />
+        <View style={styles.ambientHeaderGlow2} />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.brand} />
+        </View>
       </View>
     )
   }
 
   return (
-    <FlatList
+    <View style={styles.container}>
+      <View style={styles.ambientHeaderGlow} />
+      <View style={styles.ambientHeaderGlow2} />
+      <FlatList
       data={list}
       keyExtractor={(item) => String(item._id)}
       onRefresh={load}
@@ -75,6 +82,7 @@ export default function PhysioDisputesScreen() {
       }
       renderItem={({ item }) => <DisputeCard item={item} />}
     />
+    </View>
   )
 }
 
@@ -132,17 +140,17 @@ const DisputeCard = memo(function DisputeCard({ item }) {
 })
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas },
+  root: { flex: 1, backgroundColor: 'transparent' },
   listPad: { padding: 16, paddingBottom: 28, gap: 10 },
-  emptyPad: { flexGrow: 1, padding: 24, justifyContent: 'center' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.canvas },
+  emptyPad: { flexGrow: 1, padding: 24, justifyContent: 'center', backgroundColor: 'transparent' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent' },
 
   emptyBox: { alignItems: 'center', gap: 8, paddingVertical: 40 },
   emptyIconWrap: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.slate50,
+    backgroundColor: 'rgba(13, 148, 136, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
@@ -154,15 +162,15 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     borderRadius: 14,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   cardAccent: { width: 4, alignSelf: 'stretch' },
   cardBody: { flex: 1, padding: 14, gap: 8 },
@@ -178,9 +186,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: colors.slate50,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
   },
   raisedByTxt: { fontFamily: font.medium, fontSize: 10, color: colors.textSecondary },
 
@@ -203,7 +211,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
     padding: 10,
     borderRadius: 10,
-    backgroundColor: colors.successBg,
+    backgroundColor: 'rgba(236, 253, 245, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.15)',
   },
   resolutionTxt: {
     flex: 1,
@@ -211,5 +221,33 @@ const styles = StyleSheet.create({
     fontSize: type.xs,
     color: colors.emerald700,
     lineHeight: leading.xs,
+  },
+
+  // New backgrounds/glows
+  container: {
+    flex: 1,
+    backgroundColor: '#e8f8f6',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  ambientHeaderGlow: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(162, 240, 239, 0.15)',
+    zIndex: 0,
+  },
+  ambientHeaderGlow2: {
+    position: 'absolute',
+    top: -50,
+    left: '20%',
+    width: '60%',
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(13, 107, 107, 0.04)',
+    zIndex: 0,
   },
 })

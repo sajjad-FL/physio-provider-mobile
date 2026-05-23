@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { CommonActions } from '@react-navigation/native'
 import { hydrateFromStorage, subscribeAuth, clearSession, getTokenSync, getRoleSync } from '../auth/tokenStore'
+import { queryClient } from '../api/queryClient'
 import { useExpoPushRegistration } from '../push/useExpoPushRegistration'
 
 const AuthContext = createContext(null)
@@ -29,6 +30,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async (navigation) => {
     await clearSession()
+    queryClient.clear()
     navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] }))
   }, [])
 

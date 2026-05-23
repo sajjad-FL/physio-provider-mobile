@@ -25,13 +25,13 @@ function typeLabel(row) {
 }
 
 function typePalette(t, row) {
-  if (row?.isSynthetic) return { bg: colors.slate50, fg: colors.slate700, bd: colors.borderSubtle }
+  if (row?.isSynthetic) return { bg: 'rgba(241, 245, 249, 0.6)', fg: colors.slate700, bd: 'rgba(13, 148, 136, 0.15)' }
   switch (t) {
     case 'online': return { bg: colors.emerald50, fg: colors.emerald700, bd: '#a7f3d0' }
     case 'offline': return { bg: colors.amber50, fg: colors.amber800, bd: colors.amber200 }
     case 'settlement': return { bg: colors.blue50, fg: colors.blue700, bd: '#bae6fd' }
     case 'withdrawal': return { bg: colors.rose50, fg: colors.rose900, bd: '#fecdd3' }
-    default: return { bg: colors.slate50, fg: colors.slate700, bd: colors.borderSubtle }
+    default: return { bg: 'rgba(241, 245, 249, 0.6)', fg: colors.slate700, bd: 'rgba(13, 148, 136, 0.15)' }
   }
 }
 
@@ -147,6 +147,7 @@ export default function PhysioWalletScreen() {
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false)
+  const [withdrawInputFocused, setWithdrawInputFocused] = useState(false)
 
   const loadPendingWithdraw = useCallback(async () => {
     try {
@@ -252,7 +253,7 @@ export default function PhysioWalletScreen() {
 
           {/* ── Stat tiles ── */}
           <View style={styles.statsRow}>
-            <View style={[styles.statTile, { borderLeftColor: colors.amber400 }]}>
+            <View style={[styles.statTile, { borderLeftColor: colors.warning }]}>
               <Text style={styles.statTileLabel}>COMMISSION DUE</Text>
               <Text style={[styles.statTileValue, { color: colors.amber800 }]}>{formatInr(w?.commissionDue)}</Text>
               <Text style={styles.statTileSub}>Owed from offline visits</Text>
@@ -292,7 +293,9 @@ export default function PhysioWalletScreen() {
   )
 
   return (
-    <>
+    <View style={styles.container}>
+      <View style={styles.ambientHeaderGlow} />
+      <View style={styles.ambientHeaderGlow2} />
       <FlatList
         data={txLoading ? [] : tx}
         keyExtractor={(row, i) => String(row?._id || row?.syntheticKind || i)}
@@ -327,12 +330,17 @@ export default function PhysioWalletScreen() {
             </Text>
             <Text style={styles.modalLabel}>Amount (INR)</Text>
             <TextInput
-              style={styles.modalInput}
+              style={[
+                styles.modalInput,
+                withdrawInputFocused && styles.modalInputFocused
+              ]}
               keyboardType="decimal-pad"
               value={withdrawAmount}
               onChangeText={setWithdrawAmount}
               placeholder="e.g. 5000"
               placeholderTextColor={colors.slate300}
+              onFocus={() => setWithdrawInputFocused(true)}
+              onBlur={() => setWithdrawInputFocused(false)}
             />
             <View style={styles.modalActions}>
               <Pressable style={styles.modalCancel} onPress={() => setWithdrawOpen(false)}>
@@ -351,12 +359,12 @@ export default function PhysioWalletScreen() {
           </View>
         </View>
       </Modal>
-    </>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas },
+  root: { flex: 1, backgroundColor: 'transparent' },
   listPad: { padding: 16, paddingBottom: 20 },
   loaderWrap: { paddingVertical: 60, alignItems: 'center' },
 
@@ -367,13 +375,15 @@ const styles = StyleSheet.create({
     padding: 22,
     gap: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 16,
     elevation: 8,
   },
-  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifycontent: 'space-between' },
   heroLeft: { flex: 1 },
   heroLabel: { fontFamily: font.bold, fontSize: type.xs, letterSpacing: 1, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', marginBottom: 8 },
   heroAmount: { fontFamily: font.bold, fontSize: 32, color: '#fff', letterSpacing: -1, lineHeight: 36 },
@@ -406,10 +416,10 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   statTile: {
     flex: 1,
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     borderLeftWidth: 3,
     padding: 14,
     gap: 3,
@@ -431,10 +441,10 @@ const styles = StyleSheet.create({
 
   // Breakdown
   breakdownCard: {
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     overflow: 'hidden',
   },
   bdRow: {
@@ -442,7 +452,7 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
+    borderBottomColor: 'rgba(13, 148, 136, 0.08)',
   },
   bdRowLast: { borderBottomWidth: 0 },
   bdLeft: { flexShrink: 0, paddingTop: 2 },
@@ -461,14 +471,16 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderSubtle,
+    borderTopColor: 'rgba(13, 148, 136, 0.12)',
   },
   txRowSynth: {
-    backgroundColor: colors.slate50,
+    backgroundColor: 'rgba(240, 253, 250, 0.88)',
+    borderColor: 'rgba(13, 148, 136, 0.15)',
+    borderWidth: 1,
     borderRadius: 12,
     padding: 14,
     borderTopWidth: 0,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   txIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   txBody: { flex: 1, gap: 5 },
@@ -485,17 +497,17 @@ const styles = StyleSheet.create({
   footer: { marginTop: 8 },
 
   // Modal
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 20 },
+  modalBg: { flex: 1, backgroundColor: 'rgba(13, 50, 50, 0.3)', justifyContent: 'center', padding: 20 },
   modalCard: {
-    backgroundColor: colors.white,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 20,
     padding: 22,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     gap: 14,
-    shadowColor: '#000',
+    shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
@@ -505,18 +517,22 @@ const styles = StyleSheet.create({
   modalLabel: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   modalInput: {
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: 'rgba(13, 148, 136, 0.15)',
     borderRadius: 12,
     padding: 14,
     fontFamily: font.regular,
     fontSize: type.base,
     color: colors.textPrimary,
-    backgroundColor: colors.canvas,
+    backgroundColor: 'rgba(241, 245, 249, 0.6)',
   },
-  modalActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
+  modalInputFocused: {
+    borderColor: colors.brand,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+  },
+  modalActions: { flexDirection: 'row', gap: 10, justifycontent: 'flex-end' },
   modalCancel: {
     paddingHorizontal: 16, paddingVertical: 11, borderRadius: 11,
-    borderWidth: 1, borderColor: colors.borderSubtle,
+    borderWidth: 1, borderColor: 'rgba(13, 148, 136, 0.15)',
   },
   modalCancelTxt: { fontFamily: font.semiBold, fontSize: type.base, color: colors.textSecondary },
   modalSubmit: {
@@ -525,4 +541,32 @@ const styles = StyleSheet.create({
   },
   modalSubmitBusy: { opacity: 0.7 },
   modalSubmitTxt: { fontFamily: font.semiBold, fontSize: type.base, color: colors.white },
+
+  // New backgrounds/glows
+  container: {
+    flex: 1,
+    backgroundColor: '#e8f8f6',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  ambientHeaderGlow: {
+    position: 'absolute',
+    top: -120,
+    left: -60,
+    right: -60,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(162, 240, 239, 0.15)',
+    zIndex: 0,
+  },
+  ambientHeaderGlow2: {
+    position: 'absolute',
+    top: -50,
+    left: '20%',
+    width: '60%',
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(13, 107, 107, 0.04)',
+    zIndex: 0,
+  },
 })

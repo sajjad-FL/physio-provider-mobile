@@ -49,3 +49,18 @@ export function formatBookingDateAndSlot(dateStr, timeSlot) {
   const datePart = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
   return `${datePart}, ${timePart}`
 }
+
+export const DOB_PICKER_MIN = new Date(1900, 0, 1)
+
+/** Wheel start when no DOB saved yet (~25 years old, within min/max). */
+export function defaultDobPickerDate(maxDate = new Date(), yearsAgo = 25) {
+  const max = new Date(maxDate)
+  max.setHours(12, 0, 0, 0)
+  const d = new Date(max)
+  d.setFullYear(d.getFullYear() - yearsAgo)
+  const min = new Date(DOB_PICKER_MIN)
+  min.setHours(12, 0, 0, 0)
+  if (d < min) return min
+  if (d > max) return max
+  return d
+}
