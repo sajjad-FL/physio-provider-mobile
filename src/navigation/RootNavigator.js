@@ -15,13 +15,14 @@ import PhysioVerificationRedirectScreen from '../screens/PhysioVerificationRedir
 import RegisterPhysioScreen from '../screens/RegisterPhysioScreen'
 import PhysioTabNavigator from './PhysioTabNavigator'
 import { defaultNativeStackScreenOptions } from './navLayout'
+import { getDefaultDashboardScreen } from '../auth/navigationTargets'
 
 const Stack = createNativeStackNavigator()
 
 export default function RootNavigator() {
-  const { ready } = useAuth()
+  const { ready, token } = useAuth()
 
-  console.log('[RootNavigator.js] ready:', ready)
+  console.log('[RootNavigator.js] ready:', ready, 'hasToken:', Boolean(token))
 
   if (!ready) {
     return (
@@ -33,7 +34,7 @@ export default function RootNavigator() {
 
   return (
     <Stack.Navigator
-      initialRouteName="Login"
+      initialRouteName={token ? getDefaultDashboardScreen() : 'Login'}
       screenOptions={{
         ...defaultNativeStackScreenOptions,
         headerBackTitleVisible: false,

@@ -1,18 +1,16 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { colors } from '../theme/colors'
-import { font } from '../theme/typography'
-import { figmaTokens, figmaShadowCard } from '../theme/figmaTokens'
+import { font, type } from '../theme/typography'
 import { setBottomTabBarHeight } from './tabBarMetrics'
 
 export default function CustomTabBar({ state, descriptors, navigation }) {
   const insets = useSafeAreaInsets()
-  const bottomInset = insets.bottom || 12
 
   return (
     <View
-      style={[styles.bar, { bottom: bottomInset }]}
-      onLayout={(event) => setBottomTabBarHeight(event.nativeEvent.layout.height + bottomInset)}
+      style={[styles.bar, { paddingBottom: (insets.bottom || 0) + 4 }]}
+      onLayout={(event) => setBottomTabBarHeight(event.nativeEvent.layout.height)}
     >
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key]
@@ -20,7 +18,7 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
 
         const label = options.tabBarLabel ?? options.title ?? route.name
         const icon = options.tabBarIcon?.({
-          color: focused ? figmaTokens.primary : colors.slate400,
+          color: focused ? colors.brand : colors.slate400,
           size: 22,
           focused,
         })
@@ -63,16 +61,16 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
 
 const styles = StyleSheet.create({
   bar: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    paddingVertical: 8,
-    ...figmaShadowCard,
+    backgroundColor: colors.white,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    paddingTop: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 12,
   },
   tab: {
     flex: 1,
@@ -82,22 +80,21 @@ const styles = StyleSheet.create({
   tabPressed: { opacity: 0.65 },
 
   iconWrap: {
-    width: 48,
-    height: 32,
-    borderRadius: 16,
+    width: 46,
+    height: 28,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconWrapActive: {
-    backgroundColor: figmaTokens.mintSoft,
+    backgroundColor: colors.teal50,
   },
 
   label: {
     fontFamily: font.semiBold,
-    fontSize: 9,
-    marginTop: 2,
+    fontSize: 10,
   },
-  labelActive: { color: figmaTokens.primary },
+  labelActive: { color: colors.brand },
   labelInactive: { color: colors.slate400 },
 
   badge: {

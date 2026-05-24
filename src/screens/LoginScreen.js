@@ -55,10 +55,21 @@ export default function LoginScreen({ navigation }) {
     console.log('[LoginScreen.js] useEffect running, hasToken:', Boolean(getTokenSync()))
     if (getTokenSync()) {
       console.log('[LoginScreen.js] Redirecting to default dashboard target')
-      navigation.dispatch(
-        CommonActions.reset({ index: 0, routes: [{ name: getDefaultDashboardScreen() }] }),
-      )
-      return
+      const redirectTimer = setTimeout(() => {
+        navigation.dispatch(
+          CommonActions.reset({ index: 0, routes: [{ name: getDefaultDashboardScreen() }] }),
+        )
+      }, 50)
+
+      const fallbackTimer = setTimeout(() => {
+        console.log('[LoginScreen.js] Redirect fallback triggered')
+        setBusy(false)
+      }, 1000)
+
+      return () => {
+        clearTimeout(redirectTimer)
+        clearTimeout(fallbackTimer)
+      }
     }
     console.log('[LoginScreen.js] Setting busy to false')
     setBusy(false)
