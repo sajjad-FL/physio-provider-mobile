@@ -20,7 +20,6 @@ import { usePhysioBookings } from '../api/queries'
 import { colors } from '../theme/colors'
 import { font, type, leading } from '../theme/typography'
 import { formatBookingDateAndSlot } from '../utils/date'
-import { openGoogleMapsDestination } from '../utils/googleMaps'
 import { normalizeIndianPhone } from '../utils/phoneIndia'
 import { matchesFilters } from '../utils/physioBookingHelpers'
 
@@ -332,7 +331,6 @@ export default function PhysioBookingsScreen({ navigation }) {
         ListHeaderComponent={header}
         contentContainerStyle={styles.listPad}
         renderItem={({ item: b }) => {
-          const canStart = Boolean(b.userId?.coordinates || String(b.userId?.location || '').trim())
           const svc = serviceChipColors(b)
           const st = statusChipColors(b)
           const accent = statusAccent(b)
@@ -362,48 +360,32 @@ export default function PhysioBookingsScreen({ navigation }) {
                   </View>
                 </View>
 
-                {/* Patient row */}
-                <View style={styles.cardPatientRow}>
-                  <View style={[styles.cardAvatar, { backgroundColor: accent + '22' }]}>
-                    <Text style={[styles.cardAvatarTxt, { color: accent }]}>
-                      {patientInitial(b.userId?.name)}
-                    </Text>
+                {/* Patient + details */}
+                <View style={styles.cardPatientSection}>
+                  <View style={styles.cardPatientRow}>
+                    <View style={[styles.cardAvatar, { backgroundColor: accent + '22' }]}>
+                      <Text style={[styles.cardAvatarTxt, { color: accent }]}>
+                        {patientInitial(b.userId?.name)}
+                      </Text>
+                    </View>
+                    <View style={styles.cardPatientBody}>
+                      <Text style={styles.cardPatientName} numberOfLines={1}>
+                        {b.userId?.name ?? '—'}
+                      </Text>
+                      {b.issue ? (
+                        <Text style={styles.cardIssue} numberOfLines={1}>{b.issue}</Text>
+                      ) : null}
+                    </View>
                   </View>
-                  <View style={styles.cardPatientBody}>
-                    <Text style={styles.cardPatientName} numberOfLines={1}>
-                      {b.userId?.name ?? '—'}
-                    </Text>
-                    {b.userId?.phone ? (
-                      <Text style={styles.cardPhone}>{b.userId.phone}</Text>
-                    ) : null}
-                    {b.issue ? (
-                      <Text style={styles.cardIssue} numberOfLines={1}>{b.issue}</Text>
-                    ) : null}
-                  </View>
-                </View>
 
-                {/* Action row */}
-                <View style={styles.cardActions}>
                   <Pressable
-                    style={[styles.startBtn, !canStart && styles.startBtnDisabled]}
-                    disabled={!canStart}
+                    style={styles.cardDetailsLink}
                     onPress={(e) => {
                       e.stopPropagation?.()
-                      openGoogleMapsDestination({
-                        coordinates: b.userId?.coordinates,
-                        address: b.userId?.location,
-                      })
+                      navigation.navigate('PhysioBookingDetail', { id: b._id })
                     }}
                   >
-                    <Ionicons name="navigate-outline" size={13} color={canStart ? colors.white : colors.slate400} />
-                    <Text style={[styles.startBtnTxt, !canStart && styles.startBtnTxtDisabled]}>Directions</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.detailBtn}
-                    onPress={() => navigation.navigate('PhysioBookingDetail', { id: b._id })}
-                  >
-                    <Text style={styles.detailBtnTxt}>Details</Text>
+                    <Text style={styles.cardDetailsTxt}>Details</Text>
                     <Ionicons name="chevron-forward" size={13} color={colors.brand} />
                   </Pressable>
                 </View>
@@ -606,7 +588,7 @@ const styles = StyleSheet.create({
   },
   cardPressed: { opacity: 0.92 },
   cardAccent: { width: 4, alignSelf: 'stretch', flexShrink: 0 },
-  cardBody: { flex: 1, padding: 14, gap: 10 },
+  cardBody: { flex: 1, padding: 14, gap: 8 },
 
   cardTopRow: {
     flexDirection: 'row',
@@ -625,6 +607,7 @@ const styles = StyleSheet.create({
   },
   pillTxt: { fontFamily: font.bold, fontSize: 9, letterSpacing: 0.3 },
 
+  cardPatientSection: { gap: 6 },
   cardPatientRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   cardAvatar: {
     width: 38,
@@ -637,7 +620,6 @@ const styles = StyleSheet.create({
   cardAvatarTxt: { fontFamily: font.bold, fontSize: type.base },
   cardPatientBody: { flex: 1, minWidth: 0 },
   cardPatientName: { fontFamily: font.semiBold, fontSize: type.base, color: colors.textPrimary },
-  cardPhone: { marginTop: 2, fontFamily: font.regular, fontSize: type.xs, color: colors.textSecondary },
   cardIssue: {
     marginTop: 2,
     fontFamily: font.regular,
@@ -645,33 +627,14 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     fontStyle: 'italic',
   },
-
-  cardActions: {
+  cardDetailsLink: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(13, 148, 136, 0.08)',
-  },
-  startBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
-    backgroundColor: colors.brand,
-  },
-  startBtnDisabled: { backgroundColor: colors.slate100 },
-  startBtnTxt: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.white },
-  startBtnTxtDisabled: { color: colors.slate400 },
-  detailBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignSelf: 'flex-end',
     gap: 3,
+    marginTop: 2,
   },
-  detailBtnTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
+  cardDetailsTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
 
   // Error state
   errorCard: {

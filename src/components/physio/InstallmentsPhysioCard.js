@@ -70,10 +70,12 @@ export default function InstallmentsPhysioCard({
   const s = summary || {}
   const totalAmount = Number(s.totalAmount || 0)
   const totalPaid = Number(s.totalPaid || 0)
-  const outstanding = Number(s.outstanding || Math.max(0, totalAmount - totalPaid))
+  const totalCollected = Number(s.totalCollected || 0)
+  const effectivePaid = totalPaid + totalCollected
+  const outstanding = Math.max(0, totalAmount - effectivePaid)
   const sessionsCount = Number(s.sessionsCount || 0)
   const milestoneStatus = Array.isArray(s.milestoneStatus) ? s.milestoneStatus : null
-  const paidPct = totalAmount > 0 ? totalPaid / totalAmount : 0
+  const paidPct = totalAmount > 0 ? effectivePaid / totalAmount : 0
 
   // Next unmet milestone
   const nextMilestone = milestoneStatus
@@ -98,7 +100,7 @@ export default function InstallmentsPhysioCard({
         <View style={styles.sumBox}>
           <Text style={styles.sumL}>Paid</Text>
           <Text style={styles.sumV}>
-            {formatRupees(totalPaid)}{' '}
+            {formatRupees(effectivePaid)}{' '}
             <Text style={styles.sumMuted}>of {formatRupees(totalAmount)}</Text>
           </Text>
         </View>

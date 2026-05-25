@@ -2,13 +2,13 @@ import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import * as Location from 'expo-location'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
-  KeyboardAvoidingView,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +19,7 @@ import {
 import Toast from 'react-native-toast-message'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../api/client'
+import { getTokenSync } from '../auth/tokenStore'
 import {
   DEFAULT_REFERRAL_REWARD_AMOUNT,
   DEFAULT_REFERRAL_SIGNUP_BONUS_AMOUNT,
@@ -61,32 +62,39 @@ function parseYmd(s) {
 }
 
 // Custom Premium Form Input component
-function PremiumInput({ icon, error, label, style, multiline, ...props }) {
+function PremiumInput({ icon, error, label, style, multiline, editable = true, onFocus: onFocusProp, onBlur: onBlurProp, ...props }) {
   const [focused, setFocused] = useState(false)
+  const inputRef = useRef(null)
   return (
     <View style={styles.inputWrapper}>
       {label ? <Text style={styles.inputLabel}>{label}</Text> : null}
-      <View style={[
-        styles.inputContainer,
-        multiline && styles.textAreaContainer,
-        focused && styles.inputContainerFocused,
-        error && styles.inputContainerError,
-        style
-      ]}>
+      <Pressable
+        onPress={() => editable && inputRef.current?.focus()}
+        style={[
+          styles.inputContainer,
+          multiline && styles.textAreaContainer,
+          focused && styles.inputContainerFocused,
+          error && styles.inputContainerError,
+          !editable && styles.inputContainerDisabled,
+          style
+        ]}
+      >
         <Ionicons
           name={icon}
           size={18}
-          color={focused ? figmaTokens.primary : colors.slate400}
+          color={colors.slate400}
           style={[styles.inputIcon, multiline && { marginTop: 12 }]}
         />
         <TextInput
+          ref={inputRef}
           {...props}
+          editable={editable}
           multiline={multiline}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          style={[styles.textInput, multiline && styles.textInputMultiline]}
+          onFocus={(e) => { setFocused(true); onFocusProp?.(e) }}
+          onBlur={(e) => { setFocused(false); onBlurProp?.(e) }}
+          style={[styles.textInput, multiline && styles.textInputMultiline, !editable && styles.textInputDisabled]}
         />
-      </View>
+      </Pressable>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   )
@@ -132,6 +140,11 @@ function PremiumDateInput({ label, value, onPress, error }) {
 
 export default function ProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets()
+  const scrollRef = useRef(null)
+
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150)
+  }, [])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -378,14 +391,23 @@ export default function ProfileScreen({ navigation }) {
           type: mime,
         })
       }
-      const res = await api.patch('/profile/avatar', fd)
-      const next = res.data?.avatarUrl || ''
+      const token = getTokenSync()
+      const uploadResp = await fetch(`${api.defaults.baseURL}/profile/avatar`, {
+        method: 'PATCH',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      })
+      const uploadData = await uploadResp.json().catch(() => ({}))
+      if (!uploadResp.ok) {
+        throw new Error(uploadData.message || `Upload failed (${uploadResp.status})`)
+      }
+      const next = uploadData?.avatarUrl || ''
       setAvatarUrl(next)
       setPreviewLocal(null)
       Toast.show({ type: 'success', text1: 'Photo updated' })
     } catch (err) {
       setPreviewLocal(null)
-      Toast.show({ type: 'error', text1: err.response?.data?.message || 'Upload failed' })
+      Toast.show({ type: 'error', text1: err?.message || 'Upload failed' })
     } finally {
       setUploading(false)
     }
@@ -476,7 +498,6 @@ export default function ProfileScreen({ navigation }) {
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
     >
       {/* Ambient Top Background Halo Glow */}
       <View style={styles.ambientHeaderGlow} pointerEvents="none" />
@@ -494,6 +515,7 @@ export default function ProfileScreen({ navigation }) {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.pad, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -720,6 +742,7 @@ export default function ProfileScreen({ navigation }) {
             placeholder="Apartment/Flat, Street details, Landmark, Area"
             placeholderTextColor={colors.slate400}
             multiline
+            editable={false}
             error={fieldErrors.address || fieldErrors.addressCoords}
           />
         </View>
@@ -821,6 +844,7 @@ export default function ProfileScreen({ navigation }) {
               onChangeText={(v) => { setSpecialization(v); patchField('specialization', v) }}
               placeholder="e.g. Orthopedic Rehab, Neurological Care"
               placeholderTextColor={colors.slate400}
+              onFocus={scrollToBottom}
               error={fieldErrors.specialization}
             />
 
@@ -836,6 +860,7 @@ export default function ProfileScreen({ navigation }) {
                   keyboardType="number-pad"
                   placeholder="0"
                   placeholderTextColor={colors.slate400}
+                  onFocus={scrollToBottom}
                   error={fieldErrors.profileExperience}
                 />
               </View>
@@ -848,6 +873,7 @@ export default function ProfileScreen({ navigation }) {
                   keyboardType="decimal-pad"
                   placeholder="₹0"
                   placeholderTextColor={colors.slate400}
+                  onFocus={scrollToBottom}
                   error={fieldErrors.profileFees}
                 />
               </View>
@@ -1246,6 +1272,13 @@ const styles = StyleSheet.create({
   inputContainerError: {
     borderColor: colors.danger,
     backgroundColor: colors.dangerBg,
+  },
+  inputContainerDisabled: {
+    backgroundColor: colors.slate100,
+    borderColor: colors.borderSubtle,
+  },
+  textInputDisabled: {
+    color: colors.textSecondary,
   },
   inputIcon: {
     marginLeft: 12,

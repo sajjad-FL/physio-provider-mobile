@@ -1,7 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import Toast from 'react-native-toast-message'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -269,6 +269,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
   const [rescheduleBusy, setRescheduleBusy] = useState(false)
   const [recordAmount, setRecordAmount] = useState('')
   const [recordNote, setRecordNote] = useState('')
+  const [recordSessionId, setRecordSessionId] = useState('__general__')
   const [recordErr, setRecordErr] = useState('')
   const [recordBusy, setRecordBusy] = useState(false)
   const [notesExpanded, setNotesExpanded] = useState(true)
@@ -329,13 +330,66 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
     paymentSummary?.totalAmount ?? booking?.totalAmount ?? booking?.payment?.amount ?? 0,
   )
   const totalPaid = Number(paymentSummary?.totalPaid ?? booking?.totalPaid ?? 0)
-  const outstanding = Number(
-    paymentSummary?.outstanding ?? Math.max(0, totalAmount - totalPaid),
-  )
-  const paidPercent = totalAmount > 0 ? Math.min(100, (totalPaid / totalAmount) * 100) : 0
+  const totalCollected = Number(paymentSummary?.totalCollected ?? 0)
+  const effectivePaid = totalPaid + totalCollected
+  const outstanding = Math.max(0, totalAmount - effectivePaid)
+  const paidPercent = totalAmount > 0 ? Math.min(100, (effectivePaid / totalAmount) * 100) : 0
   const milestoneStatus = paymentSummary?.milestoneStatus ?? null
   const showInstallments =
     booking?.planStatus === 'approved' || booking?.serviceType === 'online' || paymentsList.length > 0
+
+  const hasPaymentForSession = useCallback(
+    (sessionId) => {
+      if (!sessionId) return false
+      return paymentsList.some(
+        (p) =>
+          String(p.sessionId) === String(sessionId) &&
+          ['collected', 'verified'].includes(p.status),
+      )
+    },
+    [paymentsList],
+  )
+
+  function openRecordCollectionForSession(row) {
+    setRecordSessionId(row?.sessionId ? String(row.sessionId) : '__general__')
+    setRecordAmount('')
+    setRecordNote('')
+    setRecordErr('')
+    setRecordCollectionOpen(true)
+  }
+
+  function requestCompleteSession(row) {
+    if (!booking || !row) return
+    const sessionPaymentMissing = Boolean(row.sessionId && !hasPaymentForSession(row.sessionId))
+    const needsWarning =
+      isOfflinePlan && outstanding > 0.009 && sessionPaymentMissing
+
+    if (needsWarning) {
+      Alert.alert(
+        `No payment recorded for Session ${row.n}`,
+        `Outstanding is ₹${outstanding.toFixed(2)}. Did you collect anything for this session?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Record collection',
+            onPress: () => openRecordCollectionForSession(row),
+          },
+          {
+            text: 'Complete without payment',
+            style: 'destructive',
+            onPress: () => {
+              if (row.perSession) completeOneSession(row)
+              else completeSession(booking._id)
+            },
+          },
+        ],
+      )
+      return
+    }
+
+    if (row.perSession) completeOneSession(row)
+    else completeSession(booking._id)
+  }
 
   const showPlanPending = useMemo(() => {
     if (!booking) return false
@@ -349,7 +403,13 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
       Toast.show({ type: 'success', text1: 'Session marked complete' })
       await load()
     } catch (e) {
-      Toast.show({ type: 'error', text1: e.response?.data?.message || 'Failed' })
+      const code = e.response?.data?.code
+      const msg = e.response?.data?.message
+      if (code === 'payment_milestone_not_met') {
+        Toast.show({ type: 'error', text1: 'Payment required', text2: msg || 'Collect the required payment before marking complete.' })
+      } else {
+        Toast.show({ type: 'error', text1: msg || 'Failed to complete session' })
+      }
     } finally {
       setBusyId(null)
     }
@@ -364,9 +424,29 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
       Toast.show({ type: 'success', text1: `Session #${row.n} marked complete` })
       await load()
     } catch (e) {
-      Toast.show({ type: 'error', text1: e.response?.data?.message || 'Failed' })
+      const code = e.response?.data?.code
+      const msg = e.response?.data?.message
+      if (code === 'payment_milestone_not_met') {
+        Toast.show({ type: 'error', text1: 'Payment required', text2: msg || 'Collect the required payment before marking complete.' })
+      } else {
+        Toast.show({ type: 'error', text1: msg || 'Failed to complete session' })
+      }
     } finally {
       setBusySessionKey(null)
+    }
+  }
+
+  async function respondToAssignment(action) {
+    if (!booking) return
+    setBusyId(booking._id)
+    try {
+      await api.patch(`/physio/bookings/${booking._id}/assignment`, { action })
+      Toast.show({ type: 'success', text1: action === 'accept' ? 'Assignment accepted' : 'Assignment declined' })
+      await load()
+    } catch (e) {
+      Toast.show({ type: 'error', text1: e.response?.data?.message || 'Failed' })
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -420,11 +500,13 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
       await api.post(`/physio/bookings/${booking._id}/collections`, {
         amount: amt,
         note: recordNote.trim(),
+        sessionId: recordSessionId === '__general__' ? null : recordSessionId,
       })
       Toast.show({ type: 'success', text1: 'Collection recorded' })
       setRecordCollectionOpen(false)
       setRecordAmount('')
       setRecordNote('')
+      setRecordSessionId('__general__')
       await load()
     } catch (e) {
       const msg = e.response?.data?.message || 'Could not record'
@@ -474,6 +556,18 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
 
   const rescheduleMinDate = useMemo(() => startOfToday(), [])
   const noteRows = useMemo(() => (booking ? normalizeSessionRows(booking) : []), [booking])
+  const collectionSessionOptions = useMemo(() => {
+    const sessionOpts = noteRows
+      .filter((r) => r.sessionId)
+      .map((r) => ({
+        value: String(r.sessionId),
+        label: `Session ${r.n} — ${formatBookingDateAndSlot(r.date, r.time)}`,
+      }))
+    return [
+      ...sessionOpts,
+      { value: '__general__', label: 'General (not tied to a session)' },
+    ]
+  }, [noteRows])
   const multiNotes = noteRows.length > 1
 
   const toggleNotes = useCallback(() => {
@@ -509,6 +603,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
 
   const b = booking
   const busy = busyId === b._id
+  const isAssigned = b.status === 'assigned'
   const canStartNavigation = Boolean(b.userId?.coordinates || String(b.userId?.location || '').trim())
   const hasPhone = Boolean(b.userId?.phone)
   const scrollBottomPad = 14 + insets.bottom + 14
@@ -517,7 +612,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
     <BookingDetailChrome
       navigation={navigation}
       insetsTop={insets.top}
-      title={b.userId?.name || 'Booking'}
+      title={isAssigned ? 'Assignment Pending' : (b.userId?.name || 'Booking')}
       subtitle={formatBookingDateAndSlot(b.date, b.timeSlot)}
     >
       <ScrollView
@@ -560,26 +655,35 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
 
           {/* Main Content: Avatar + Name + Details */}
           <View style={styles.premiumHeroMiddle}>
-            <View style={styles.premiumAvatarRing}>
-              <View style={styles.premiumAvatarContainer}>
-                <Text style={styles.premiumAvatarText}>{patientInitial(b.userId?.name)}</Text>
+            {isAssigned ? (
+              <View style={styles.assignedPlaceholder}>
+                <Ionicons name="lock-closed-outline" size={18} color={colors.slate400} />
+                <Text style={styles.assignedPlaceholderTxt}>Patient details are hidden until you accept the assignment.</Text>
               </View>
-            </View>
-            <View style={styles.premiumPatientInfo}>
-              <Text style={styles.premiumPatientName} numberOfLines={1}>{b.userId?.name ?? '—'}</Text>
-              {b.userId?.phone ? (
-                <Pressable onPress={() => callPhone(b.userId.phone)} style={styles.premiumPhoneRow}>
-                  <Ionicons name="call-outline" size={12} color={colors.slate500} />
-                  <Text style={styles.premiumPatientPhone}>{b.userId.phone}</Text>
-                </Pressable>
-              ) : null}
-              {b.issue ? (
-                <View style={styles.premiumComplaintBadge}>
-                  <Ionicons name="medical-outline" size={11} color={colors.brand} />
-                  <Text style={styles.premiumComplaintText} numberOfLines={1}>{b.issue}</Text>
+            ) : (
+              <>
+                <View style={styles.premiumAvatarRing}>
+                  <View style={styles.premiumAvatarContainer}>
+                    <Text style={styles.premiumAvatarText}>{patientInitial(b.userId?.name)}</Text>
+                  </View>
                 </View>
-              ) : null}
-            </View>
+                <View style={styles.premiumPatientInfo}>
+                  <Text style={styles.premiumPatientName} numberOfLines={1}>{b.userId?.name ?? '—'}</Text>
+                  {b.userId?.phone ? (
+                    <Pressable onPress={() => callPhone(b.userId.phone)} style={styles.premiumPhoneRow}>
+                      <Ionicons name="call-outline" size={12} color={colors.slate500} />
+                      <Text style={styles.premiumPatientPhone}>{b.userId.phone}</Text>
+                    </Pressable>
+                  ) : null}
+                  {b.issue ? (
+                    <View style={styles.premiumComplaintBadge}>
+                      <Ionicons name="medical-outline" size={11} color={colors.brand} />
+                      <Text style={styles.premiumComplaintText} numberOfLines={1}>{b.issue}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </>
+            )}
           </View>
 
           {/* Bottom Row: Date & Slot Display */}
@@ -589,60 +693,100 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
             <Text style={styles.premiumHeroDateText}>{formatBookingDateAndSlot(b.date, b.timeSlot)}</Text>
           </View>
 
-          {/* Action pill bar */}
-          <View style={styles.premiumActionRow}>
-            <Pressable
-              style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
-              disabled={!hasPhone}
-              onPress={() => callPhone(b.userId.phone)}
-            >
-              <Ionicons name="call" size={14} color={hasPhone ? colors.brand : colors.slate300} />
-              <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>Call</Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
-              disabled={!hasPhone}
-              onPress={() => openWhatsApp(b.userId.phone)}
-            >
-              <Ionicons name="logo-whatsapp" size={14} color={hasPhone ? '#16a34a' : colors.slate300} />
-              <Text style={[styles.premiumActionBtnTxt, { color: hasPhone ? '#16a34a' : colors.slate300 }]}>WhatsApp</Text>
-            </Pressable>
-
-            {b.serviceType !== 'online' ? (
+          {/* Action pill bar — hidden until assignment is accepted */}
+          {!isAssigned ? (
+            <View style={styles.premiumActionRow}>
               <Pressable
-                style={[styles.premiumActionBtn, !canStartNavigation && styles.premiumActionBtnDisabled]}
-                disabled={!canStartNavigation}
-                onPress={() => openGoogleMapsDestination({
-                  coordinates: b.userId?.coordinates,
-                  address: b.userId?.location,
-                })}
+                style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
+                disabled={!hasPhone}
+                onPress={() => callPhone(b.userId.phone)}
               >
-                <Ionicons name="navigate" size={14} color={canStartNavigation ? colors.brand : colors.slate300} />
-                <Text style={[styles.premiumActionBtnTxt, !canStartNavigation && styles.premiumActionBtnTxtDisabled]}>Navigate</Text>
+                <Ionicons name="call" size={14} color={hasPhone ? colors.brand : colors.slate300} />
+                <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>Call</Text>
               </Pressable>
-            ) : null}
-          </View>
+
+              <Pressable
+                style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
+                disabled={!hasPhone}
+                onPress={() => openWhatsApp(b.userId.phone)}
+              >
+                <Ionicons name="logo-whatsapp" size={14} color={hasPhone ? '#16a34a' : colors.slate300} />
+                <Text style={[styles.premiumActionBtnTxt, { color: hasPhone ? '#16a34a' : colors.slate300 }]}>WhatsApp</Text>
+              </Pressable>
+
+              {b.serviceType !== 'online' ? (
+                <Pressable
+                  style={[styles.premiumActionBtn, !canStartNavigation && styles.premiumActionBtnDisabled]}
+                  disabled={!canStartNavigation}
+                  onPress={() => openGoogleMapsDestination({
+                    coordinates: b.userId?.coordinates,
+                    address: b.userId?.location,
+                  })}
+                >
+                  <Ionicons name="navigate" size={14} color={canStartNavigation ? colors.brand : colors.slate300} />
+                  <Text style={[styles.premiumActionBtnTxt, !canStartNavigation && styles.premiumActionBtnTxtDisabled]}>Navigate</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
-        {/* ── Plan pending banner ────────────────────── */}
-        {showPlanPending ? (
-          <View style={styles.bannerMint}>
-            <Ionicons name="time-outline" size={14} color={colors.teal800} />
-            <Text style={styles.bannerMintTxt}>Awaiting patient approval on the proposed plan.</Text>
+        {/* ── Accept assignment banner ───────────────── */}
+        {b.status === 'assigned' ? (
+          <View style={styles.assignmentBanner}>
+            <View style={styles.assignmentBannerTop}>
+              <Ionicons name="alert-circle-outline" size={16} color={colors.amber800} />
+              <Text style={styles.assignmentBannerTitle}>Action required — accept this assignment</Text>
+            </View>
+            <Text style={styles.assignmentBannerBody}>
+              You have been assigned to this booking. Accept to confirm the visit, or decline to release it back to admin.
+            </Text>
+            <View style={styles.assignmentBannerBtns}>
+              <Pressable
+                style={[styles.assignmentAcceptBtn, busyId && styles.premiumActionBtnDisabled]}
+                disabled={!!busyId}
+                onPress={() => respondToAssignment('accept')}
+              >
+                {busyId ? <ActivityIndicator size="small" color={colors.white} /> : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={15} color={colors.white} />
+                    <Text style={styles.assignmentAcceptTxt}>Accept</Text>
+                  </>
+                )}
+              </Pressable>
+              <Pressable
+                style={[styles.assignmentRejectBtn, busyId && styles.premiumActionBtnDisabled]}
+                disabled={!!busyId}
+                onPress={() => respondToAssignment('reject')}
+              >
+                <Ionicons name="close-circle-outline" size={15} color={colors.danger} />
+                <Text style={styles.assignmentRejectTxt}>Decline</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
-        {/* ── Tab bar ────────────────────────────────── */}
-        <TabBar
-          activeTab={activeTab}
-          onChange={setActiveTab}
-          tabs={BASE_TABS}
-          badges={{ finance: showCreatePlan }}
-        />
+        {/* ── Plan pending banner & tabs — hidden until assignment accepted ── */}
+        {!isAssigned ? (
+          <>
+            {showPlanPending ? (
+              <View style={styles.bannerMint}>
+                <Ionicons name="time-outline" size={14} color={colors.teal800} />
+                <Text style={styles.bannerMintTxt}>Awaiting patient approval on the proposed plan.</Text>
+              </View>
+            ) : null}
+
+            <TabBar
+              activeTab={activeTab}
+              onChange={setActiveTab}
+              tabs={BASE_TABS}
+              badges={{ finance: showCreatePlan }}
+            />
+          </>
+        ) : null}
 
         {/* ── Treatment Hub Tab ─────────────────────────── */}
-        {activeTab === 'treatment' ? (
+        {!isAssigned && activeTab === 'treatment' ? (
           <View style={styles.tabContentGap}>
             <SessionProgressPhysio booking={b} />
 
@@ -687,12 +831,28 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                   const busyKey = String(r.sessionId || r.key)
                   const actBusy = String(busySessionKey || '') === busyKey
                   
-                  // Compute blocked reason — only calendar gate remains; milestone
-                  // enforcement is handled server-side on session complete
-                  const blockedReason = isUpcoming
+                  // Check if a payment milestone blocks this specific session
+                  const sessionMilestoneBlocked = Boolean(
+                    milestoneStatus?.some((m) => m.bySession <= r.n && !m.met)
+                  )
+                  const milestoneNeeded = sessionMilestoneBlocked
+                    ? milestoneStatus.find((m) => m.bySession <= r.n && !m.met)
+                    : null
+                  const milestoneMsg = milestoneNeeded
+                    ? `₹${Math.ceil(
+                        (milestoneNeeded.requiredPct * (paymentSummary?.totalAmount ?? 0)) -
+                        ((paymentSummary?.totalPaid ?? 0) + (paymentSummary?.totalCollected ?? 0))
+                      )} payment required first`
+                    : ''
+
+                  const blockedReason = b.status === 'assigned'
+                    ? 'Accept the assignment first'
+                    : isUpcoming
                     ? 'Available on the scheduled day'
                     : !paymentSummary
                     ? 'Payment must be secured before completion'
+                    : sessionMilestoneBlocked
+                    ? milestoneMsg
                     : ''
                     
                   const canActOnRow = !rowDone && !rowNoShow && !blockedReason
@@ -767,6 +927,29 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                                 {rowDone ? 'Done' : rowNoShow ? 'No-show' : isToday ? 'Today' : 'Scheduled'}
                               </Text>
                             </View>
+                            {rowDone ? (
+                              <View
+                                style={[
+                                  styles.stepperConfirmBadge,
+                                  r.patientConfirmed
+                                    ? styles.stepperConfirmBadgeDone
+                                    : styles.stepperConfirmBadgePending,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.stepperConfirmBadgeTxt,
+                                    r.patientConfirmed
+                                      ? styles.stepperConfirmBadgeTxtDone
+                                      : styles.stepperConfirmBadgeTxtPending,
+                                  ]}
+                                >
+                                  {r.patientConfirmed
+                                    ? 'Patient confirmed'
+                                    : 'Awaiting patient confirmation'}
+                                </Text>
+                              </View>
+                            ) : null}
                             {/* Expand/collapse chevron */}
                             <Ionicons
                               name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -803,24 +986,36 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                                 ) : null}
 
                                 <View style={[styles.stepperDrawerContent, !canActOnRow && blockedReason ? { marginTop: 8 } : null]}>
-                                  {/* Complete session is primary, full width (shown if not upcoming) */}
                                   {!isUpcoming ? (
-                                    <Pressable
-                                      style={[
-                                        styles.stepperPrimaryBtn,
-                                        (!canActOnRow || actBusy) && styles.stepperBtnDisabled
-                                      ]}
-                                      disabled={!canActOnRow || actBusy}
-                                      onPress={() => {
-                                        if (r.perSession) completeOneSession(r)
-                                        else completeSession(b._id)
-                                      }}
-                                    >
-                                      <Ionicons name="checkmark-circle-outline" size={14} color={colors.white} />
-                                      <Text style={styles.stepperPrimaryBtnTxt}>
-                                        {actBusy ? 'Saving...' : 'Mark Session Complete'}
-                                      </Text>
-                                    </Pressable>
+                                    <View style={styles.stepperActionRow}>
+                                      {isOfflinePlan ? (
+                                        <Pressable
+                                          style={[
+                                            styles.stepperCollectBtn,
+                                            (!canActOnRow || actBusy || recordBusy) && styles.stepperBtnDisabled,
+                                          ]}
+                                          disabled={!canActOnRow || actBusy || recordBusy}
+                                          onPress={() => openRecordCollectionForSession(r)}
+                                        >
+                                          <Ionicons name="cash-outline" size={13} color={colors.brand} />
+                                          <Text style={styles.stepperCollectBtnTxt}>Record collection</Text>
+                                        </Pressable>
+                                      ) : null}
+                                      <Pressable
+                                        style={[
+                                          styles.stepperCompleteBtn,
+                                          isOfflinePlan ? styles.stepperCompleteBtnHalf : styles.stepperCompleteBtnFull,
+                                          (!canActOnRow || actBusy) && styles.stepperBtnDisabled,
+                                        ]}
+                                        disabled={!canActOnRow || actBusy}
+                                        onPress={() => requestCompleteSession(r)}
+                                      >
+                                        <Ionicons name="checkmark-circle-outline" size={13} color={colors.white} />
+                                        <Text style={styles.stepperCompleteBtnTxt}>
+                                          {actBusy ? 'Saving...' : 'Mark complete'}
+                                        </Text>
+                                      </Pressable>
+                                    </View>
                                   ) : null}
 
                                   {/* Reschedule & No-show are secondary, side-by-side */}
@@ -878,7 +1073,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
         ) : null}
 
         {/* ── Plan & Billing Tab ────────────────────────── */}
-        {activeTab === 'finance' ? (
+        {!isAssigned && activeTab === 'finance' ? (
           <View style={styles.tabContentGap}>
             {/* Payment progress card */}
             <View style={styles.stripeProgressCard}>
@@ -917,7 +1112,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 <View style={styles.stripeMetric}>
                   <View style={[styles.stripeMetricDot, { backgroundColor: colors.success }]} />
                   <Text style={styles.stripeMetricLabel}>{isOnlinePayment ? 'Paid' : 'Collected'}</Text>
-                  <Text style={styles.stripeMetricVal}>₹{totalPaid.toFixed(2)}</Text>
+                  <Text style={styles.stripeMetricVal}>₹{effectivePaid.toFixed(2)}</Text>
                 </View>
                 <View style={styles.stripeMetric}>
                   <View style={[styles.stripeMetricDot, { backgroundColor: colors.warning }]} />
@@ -1108,7 +1303,16 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                   </Text>
                 </View>
               </View>
-              <Text style={styles.inputLabel}>Amount (₹)</Text>
+              <Text style={styles.inputLabel}>For session</Text>
+              <DropdownField
+                label={null}
+                value={recordSessionId}
+                placeholder="Select session"
+                options={collectionSessionOptions}
+                onSelect={setRecordSessionId}
+                variant="inline"
+              />
+              <Text style={[styles.inputLabel, { marginTop: 12 }]}>Amount (₹)</Text>
               <TextInput
                 style={[styles.inp, recordAmountFocused && styles.inpFocused]}
                 onFocus={() => setRecordAmountFocused(true)}
@@ -1422,6 +1626,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  assignedPlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    paddingVertical: 6,
+  },
+  assignedPlaceholderTxt: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: type.sm,
+    color: colors.slate400,
+    fontStyle: 'italic',
+  },
   premiumAvatarRing: {
     width: 48,
     height: 48,
@@ -1548,6 +1766,71 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandSoft,
   },
   bannerMintTxt: { flex: 1, fontFamily: font.semiBold, fontSize: type.xs, color: colors.teal800, lineHeight: 16 },
+
+  assignmentBanner: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(217,119,6,0.35)',
+    backgroundColor: colors.amber50,
+    gap: 8,
+  },
+  assignmentBannerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  assignmentBannerTitle: {
+    flex: 1,
+    fontFamily: font.bold,
+    fontSize: type.sm,
+    color: colors.amber800,
+  },
+  assignmentBannerBody: {
+    fontFamily: font.medium,
+    fontSize: type.xs,
+    color: colors.amber800,
+    lineHeight: 17,
+    opacity: 0.85,
+  },
+  assignmentBannerBtns: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  assignmentAcceptBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.success,
+  },
+  assignmentAcceptTxt: {
+    fontFamily: font.bold,
+    fontSize: type.sm,
+    color: colors.white,
+  },
+  assignmentRejectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: colors.white,
+  },
+  assignmentRejectTxt: {
+    fontFamily: font.bold,
+    fontSize: type.sm,
+    color: colors.danger,
+  },
 
   // ── Tab bar ──────────────────────────────────────
   tabIconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
@@ -2294,6 +2577,32 @@ const styles = StyleSheet.create({
   stepperStatusTextToday: {
     color: colors.brand,
   },
+  stepperConfirmBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  stepperConfirmBadgePending: {
+    backgroundColor: colors.amber50 || '#fffbeb',
+    borderColor: colors.amber200 || '#fde68a',
+  },
+  stepperConfirmBadgeDone: {
+    backgroundColor: colors.successBg || '#f0fdf4',
+    borderColor: '#a7f3d0',
+  },
+  stepperConfirmBadgeTxt: {
+    fontFamily: font.semiBold,
+    fontSize: 10,
+  },
+  stepperConfirmBadgeTxtPending: {
+    color: colors.amber800 || '#92400e',
+  },
+  stepperConfirmBadgeTxtDone: {
+    color: colors.success || '#15803d',
+  },
   stepperNoShowBox: {
     marginTop: 6,
     padding: 6,
@@ -2318,6 +2627,51 @@ const styles = StyleSheet.create({
   },
   stepperDrawerContent: {
     marginTop: 6,
+  },
+  stepperActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  stepperCollectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.25)',
+    backgroundColor: 'rgba(13, 148, 136, 0.04)',
+  },
+  stepperCollectBtnTxt: {
+    fontFamily: font.semiBold,
+    fontSize: 11,
+    color: colors.brand,
+  },
+  stepperCompleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    backgroundColor: colors.brand,
+  },
+  stepperCompleteBtnHalf: {
+    flex: 1,
+  },
+  stepperCompleteBtnFull: {
+    flex: 1,
+    width: '100%',
+  },
+  stepperCompleteBtnTxt: {
+    fontFamily: font.bold,
+    fontSize: 11,
+    color: colors.white,
   },
   stepperPrimaryBtn: {
     flexDirection: 'row',
