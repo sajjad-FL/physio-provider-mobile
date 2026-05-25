@@ -603,7 +603,11 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
 
   const b = booking
   const busy = busyId === b._id
-  const isAssigned = b.status === 'assigned'
+  // isAssigned drives the Accept/Decline gate.
+  // If planStatus is already 'proposed', the physio already engaged with the booking —
+  // treat it as accepted regardless of the stored status to avoid locking into the
+  // assignment-pending view if the status update was delayed.
+  const isAssigned = b.status === 'assigned' && b.planStatus !== 'proposed' && b.planStatus !== 'approved'
   const canStartNavigation = Boolean(b.userId?.coordinates || String(b.userId?.location || '').trim())
   const hasPhone = Boolean(b.userId?.phone)
   const scrollBottomPad = 14 + insets.bottom + 14
@@ -732,7 +736,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
         </View>
 
         {/* ── Accept assignment banner ───────────────── */}
-        {b.status === 'assigned' ? (
+        {isAssigned ? (
           <View style={styles.assignmentBanner}>
             <View style={styles.assignmentBannerTop}>
               <Ionicons name="alert-circle-outline" size={16} color={colors.amber800} />

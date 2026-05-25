@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -147,12 +148,16 @@ export default function LoginScreen({ navigation }) {
           <View style={styles.headerRow}>
             <View style={{ minWidth: 80 }} />
             <View style={styles.brandRow}>
-              <View style={styles.logoMark}>
-                <Ionicons name="pulse" size={11} color={colors.white} />
-              </View>
-              <Text style={styles.brandPhysio}>Physio</Text>
-              <Text style={styles.brandKhom}>Khom</Text>
-              <Text style={{ fontFamily: font.bold, fontSize: type.lg, color: colors.textSecondary, letterSpacing: -0.3 }}> Pro</Text>
+              <Image
+                source={require('../../assets/images/logo.png')}
+                style={styles.logoMark}
+                resizeMode="contain"
+              />
+              <Text numberOfLines={1}>
+                <Text style={styles.brandPhysio}>PhysiO</Text>
+                <Text style={styles.brandKhom}>khom</Text>
+                <Text style={{ fontFamily: font.bold, fontSize: type.lg, color: colors.textSecondary, letterSpacing: -0.3 }}> Pro</Text>
+              </Text>
             </View>
             <View style={styles.headerSpacer} />
           </View>
@@ -385,12 +390,8 @@ const styles = StyleSheet.create({
   backTxt: { fontFamily: font.medium, fontSize: type.base, color: colors.brand },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   logoMark: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    backgroundColor: colors.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 34,
+    height: 34,
   },
   brandPhysio: { fontFamily: font.bold, fontSize: type.lg, color: colors.textPrimary, letterSpacing: -0.3 },
   brandKhom: { fontFamily: font.bold, fontSize: type.lg, color: colors.brand, letterSpacing: -0.3 },

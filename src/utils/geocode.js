@@ -45,7 +45,7 @@ async function nominatimReverseGeocode(lat, lng) {
       headers: {
         Accept: 'application/json',
         'Accept-Language': 'en',
-        'User-Agent': 'PhysioKhomProvider/1.0',
+        'User-Agent': 'PhysiOkhomProvider/1.0',
       },
     })
     if (!res.ok) return ''

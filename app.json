@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PhysioKhom Pro",
+    "name": "PhysiOkhom Pro",
     "slug": "physiokhom-pro",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -36,13 +36,13 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "PhysioKhom Pro uses your location to set your coverage point for patient bookings."
+          "locationWhenInUsePermission": "PhysiOkhom Pro uses your location to set your coverage point for patient bookings."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "PhysioKhom Pro accesses your photos so you can set a profile picture."
+          "photosPermission": "PhysiOkhom Pro accesses your photos so you can set a profile picture."
         }
       ],
       [

@@ -1207,7 +1207,7 @@ export default function RegisterPhysioScreen({ navigation }) {
             <Text style={styles.sectionTitle}>Qualification declaration</Text>
             <Text style={styles.declaration}>
               {ndaPolicy.declarationText ||
-                'I confirm that all qualifications and documents I submit to PhysioKhom are accurate. Misrepresentation may result in removal from the platform and legal consequences.'}
+                'I confirm that all qualifications and documents I submit to PhysiOkhom are accurate. Misrepresentation may result in removal from the platform and legal consequences.'}
             </Text>
             <Pressable style={styles.checkRow} onPress={() => setQualificationAgreed((v) => !v)}>
               <View style={[styles.checkBox, qualificationAgreed ? styles.checkBoxOn : null]}>

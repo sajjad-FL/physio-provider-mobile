@@ -89,7 +89,7 @@ export default function PhysioMoreScreen({ navigation }) {
             </View>
             <View style={styles.heroText}>
               <Text style={styles.heroGreeting}>Hello, {firstName} 👋</Text>
-              <Text style={styles.heroSub}>PhysioKhom workspace</Text>
+              <Text style={styles.heroSub}>PhysiOkhom workspace</Text>
             </View>
             <View style={styles.roleTag}>
               <Text style={styles.roleTagTxt}>PHYSIO</Text>
