@@ -22,8 +22,6 @@ const Stack = createNativeStackNavigator()
 export default function RootNavigator() {
   const { ready, token } = useAuth()
 
-  console.log('[RootNavigator.js] ready:', ready, 'hasToken:', Boolean(token))
-
   if (!ready) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate50 }}>

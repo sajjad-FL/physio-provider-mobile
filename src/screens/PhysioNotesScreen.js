@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import KeyboardAwareScrollView from '../components/ui/KeyboardAwareScrollView'
 import { Ionicons } from '@expo/vector-icons'
 import Toast from 'react-native-toast-message'
@@ -18,6 +18,7 @@ const FIELDS = [
 export default function PhysioNotesScreen() {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [forms, setForms] = useState({})
   const [busyId, setBusyId] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
@@ -53,6 +54,12 @@ export default function PhysioNotesScreen() {
       setLoading(false)
     }
   }, [])
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }, [load])
 
   useEffect(() => { load() }, [load])
 
@@ -116,6 +123,16 @@ export default function PhysioNotesScreen() {
         style={styles.root}
         iosHeaderOffset={0}
         extraBottomPadding={44}
+        bounces={true}
+        alwaysBounceVertical={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.brand]}
+            tintColor={colors.brand}
+          />
+        }
       >
       {bookings.map((bk) => {
         const isExpanded = expandedId === bk._id

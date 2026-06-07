@@ -50,12 +50,8 @@ export default function LoginScreen({ navigation }) {
   const { authEpoch } = useAuth()
   const { padBottom, scrollViewProps, keyboardAvoidingViewProps } = useKeyboardAwareScroll()
 
-  console.log('[LoginScreen.js] busy:', busy, 'hasToken:', Boolean(getTokenSync()))
-
   useEffect(() => {
-    console.log('[LoginScreen.js] useEffect running, hasToken:', Boolean(getTokenSync()))
     if (getTokenSync()) {
-      console.log('[LoginScreen.js] Redirecting to default dashboard target')
       const redirectTimer = setTimeout(() => {
         navigation.dispatch(
           CommonActions.reset({ index: 0, routes: [{ name: getDefaultDashboardScreen() }] }),
@@ -63,7 +59,6 @@ export default function LoginScreen({ navigation }) {
       }, 50)
 
       const fallbackTimer = setTimeout(() => {
-        console.log('[LoginScreen.js] Redirect fallback triggered')
         setBusy(false)
       }, 1000)
 
@@ -72,7 +67,6 @@ export default function LoginScreen({ navigation }) {
         clearTimeout(fallbackTimer)
       }
     }
-    console.log('[LoginScreen.js] Setting busy to false')
     setBusy(false)
   }, [navigation, authEpoch])
 

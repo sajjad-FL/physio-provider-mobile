@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import Toast from 'react-native-toast-message'
 import { api } from '../api/client'
@@ -11,21 +11,30 @@ import { formatInr } from '../utils/currency'
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function typeLabel(row) {
-  if (row?.isSynthetic && row?.syntheticKind === 'net_available') return 'Withdrawable balance'
   const t = row?.type
+  const direction = row?.direction
   const leg = row?.meta?.leg
-  if (t === 'online' && leg === 'refund') return 'Refund (online)'
-  switch (t) {
-    case 'online': return 'Online payment'
-    case 'offline': return 'Offline payment'
-    case 'settlement': return 'Settlement'
-    case 'withdrawal': return 'Withdrawal'
-    default: return t || '—'
+
+  if (t === 'online') {
+    if (leg === 'refund') return 'Refund (reversed)'
+    if (direction === 'credit') return 'Online Booking Earned'
+    return 'Online payment'
   }
+  if (t === 'offline') {
+    if (leg === 'gross') return 'Cash Collected'
+    if (leg === 'commission') return 'Platform Fee (Cash)'
+    return 'Offline payment'
+  }
+  if (t === 'settlement') {
+    return 'Fee Remitted to Platform'
+  }
+  if (t === 'withdrawal') {
+    return 'Withdrawal Paid Out'
+  }
+  return t || '—'
 }
 
-function typePalette(t, row) {
-  if (row?.isSynthetic) return { bg: 'rgba(241, 245, 249, 0.6)', fg: colors.slate700, bd: 'rgba(13, 148, 136, 0.15)' }
+function typePalette(t) {
   switch (t) {
     case 'online': return { bg: colors.emerald50, fg: colors.emerald700, bd: '#a7f3d0' }
     case 'offline': return { bg: colors.amber50, fg: colors.amber800, bd: colors.amber200 }
@@ -35,8 +44,7 @@ function typePalette(t, row) {
   }
 }
 
-function typeIcon(t, row) {
-  if (row?.isSynthetic) return 'analytics-outline'
+function typeIcon(t) {
   switch (t) {
     case 'online': return 'card-outline'
     case 'offline': return 'cash-outline'
@@ -49,7 +57,7 @@ function typeIcon(t, row) {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const TypeTag = memo(function TypeTag({ type: t, row }) {
-  const p = typePalette(t, row)
+  const p = typePalette(t)
   return (
     <View style={[styles.typeTag, { backgroundColor: p.bg, borderColor: p.bd }]}>
       <Text style={[styles.typeTagTxt, { color: p.fg }]}>{typeLabel(row)}</Text>
@@ -58,28 +66,26 @@ const TypeTag = memo(function TypeTag({ type: t, row }) {
 })
 
 const TransactionRow = memo(function TransactionRow({ row }) {
-  const p = typePalette(row.type, row)
-  const icon = typeIcon(row.type, row)
-  const isCredit = !row.isSynthetic && row.direction === 'credit'
-  const isDebit = !row.isSynthetic && row.direction === 'debit'
+  const p = typePalette(row.type)
+  const icon = typeIcon(row.type)
+  const isCredit = row.direction === 'credit'
+  const isDebit = row.direction === 'debit'
 
   return (
-    <View style={[styles.txRow, row.isSynthetic && styles.txRowSynth]}>
+    <View style={styles.txRow}>
       <View style={[styles.txIconWrap, { backgroundColor: p.bg }]}>
         <Ionicons name={icon} size={16} color={p.fg} />
       </View>
       <View style={styles.txBody}>
         <View style={styles.txTopRow}>
           <TypeTag type={row.type} row={row} />
-          {!row.isSynthetic && (
-            <Text style={[styles.txDir, isCredit ? styles.txCredit : isDebit ? styles.txDebit : null]}>
-              {isCredit ? '+ Credit' : isDebit ? '− Debit' : ''}
-            </Text>
-          )}
+          <Text style={[styles.txDir, isCredit ? styles.txCredit : isDebit ? styles.txDebit : null]}>
+            {isCredit ? '+ Credit' : isDebit ? '− Debit' : ''}
+          </Text>
         </View>
         <Text style={styles.txAmount}>{formatInr(row.totalAmount)}</Text>
         <TxNote row={row} />
-        {!row.isSynthetic && row.createdAt && (
+        {row.createdAt && (
           <Text style={styles.txDate}>{new Date(row.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
         )}
       </View>
@@ -89,18 +95,16 @@ const TransactionRow = memo(function TransactionRow({ row }) {
 
 const TxNote = memo(function TxNote({ row }) {
   let note = null
-  if (row.isSynthetic && row.meta) {
-    note = `Online balance ${formatInr(row.meta.onlineAvailableBalance)} − Commission ${formatInr(row.meta.commissionDue)} = withdrawable ${formatInr(row.meta.onlineAvailableBalance - row.meta.commissionDue)}`
-  } else if (row.bookingId?.date) {
+  if (row.bookingId?.date) {
     note = `Booking ${row.bookingId.date}${row.bookingId.timeSlot ? ' · ' + row.bookingId.timeSlot : ''}`
   } else if (row.type === 'settlement' && row.meta?.note) {
     note = row.meta.note
   } else if (row.type === 'online' && row.meta?.gross != null && row.direction === 'credit') {
-    note = `Gross ${formatInr(row.meta.gross)} · Commission ${formatInr(row.commission)}`
+    note = `Gross ${formatInr(row.meta.gross)} · Platform fee ${formatInr(row.commission)}`
   } else if (row.type === 'offline' && row.meta?.leg === 'gross') {
     note = `Gross collection · Share ${formatInr(row.physioEarning)}`
   } else if (row.type === 'offline' && row.meta?.leg === 'commission') {
-    note = 'Platform commission owed'
+    note = 'Platform fee owed (reduces withdrawable balance)'
   } else if (row.type === 'withdrawal' && row.meta?.note) {
     note = row.meta.note
   }
@@ -140,6 +144,7 @@ export default function PhysioWalletScreen() {
   const [dash, setDash] = useState(null)
   const [tx, setTx] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [txLoading, setTxLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -173,6 +178,12 @@ export default function PhysioWalletScreen() {
     } catch { Toast.show({ type: 'error', text1: 'Failed to load transactions' }) }
     finally { setTxLoading(false) }
   }, [page])
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await Promise.all([loadDash(), loadTx(), loadPendingWithdraw()])
+    setRefreshing(false)
+  }, [loadDash, loadTx, loadPendingWithdraw])
 
   useEffect(() => { loadDash(); loadPendingWithdraw() }, [loadDash, loadPendingWithdraw])
   useEffect(() => { loadTx() }, [loadTx])
@@ -215,11 +226,11 @@ export default function PhysioWalletScreen() {
           <View style={styles.heroCard}>
             <View style={styles.heroTop}>
               <View style={styles.heroLeft}>
-                <Text style={styles.heroLabel}>AVAILABLE BALANCE</Text>
+                <Text style={styles.heroLabel}>WITHDRAWABLE BALANCE</Text>
                 <Text style={styles.heroAmount}>{formatInr(w?.availableBalance)}</Text>
                 {showNetExplainer && (
                   <Text style={styles.heroSub}>
-                    {formatInr(onlineAvail)} online − {formatInr(commissionDue)} commission
+                    {formatInr(onlineAvail)} online − {formatInr(commissionDue)} platform fee
                   </Text>
                 )}
               </View>
@@ -254,14 +265,14 @@ export default function PhysioWalletScreen() {
           {/* ── Stat tiles ── */}
           <View style={styles.statsRow}>
             <View style={[styles.statTile, { borderLeftColor: colors.warning }]}>
-              <Text style={styles.statTileLabel}>COMMISSION DUE</Text>
+              <Text style={styles.statTileLabel}>PLATFORM FEE OWED</Text>
               <Text style={[styles.statTileValue, { color: colors.amber800 }]}>{formatInr(w?.commissionDue)}</Text>
-              <Text style={styles.statTileSub}>Owed from offline visits</Text>
+              <Text style={styles.statTileSub}>Owed from offline cash</Text>
             </View>
             <View style={[styles.statTile, { borderLeftColor: colors.brand }]}>
               <Text style={styles.statTileLabel}>TOTAL EARNED</Text>
               <Text style={styles.statTileValue}>{formatInr(w?.totalEarned)}</Text>
-              <Text style={styles.statTileSub}>Lifetime physio share</Text>
+              <Text style={styles.statTileSub}>Lifetime earnings share</Text>
             </View>
           </View>
 
@@ -273,9 +284,9 @@ export default function PhysioWalletScreen() {
                 <Text style={styles.sectionSub}>By payment channel</Text>
               </View>
               <View style={styles.breakdownCard}>
-                <BreakdownRow type="online" label="Online" count={b.online_payment?.count} vol={b.online_payment?.volume} detail={`Online wallet (withdrawable minus commission)`} />
-                <BreakdownRow type="offline" label="Offline" count={b.offline_payment?.count} vol={b.offline_payment?.volume} detail={`Commission ${formatInr(b.offline_payment?.commissionAccrued)} · Share ${formatInr(b.offline_payment?.physioShare)}`} />
-                <BreakdownRow type="settlement" label="Settlements" count={b.settlement?.count} vol={b.settlement?.volume} detail="Remitted to platform" last />
+                <BreakdownRow type="online" label="Online" count={b.online_payment?.count} vol={b.online_payment?.volume} detail={`Online wallet (withdrawable minus platform fee)`} />
+                <BreakdownRow type="offline" label="Offline" count={b.offline_payment?.count} vol={b.offline_payment?.volume} detail={`Platform fee ${formatInr(b.offline_payment?.commissionAccrued)} · Share ${formatInr(b.offline_payment?.physioShare)}`} />
+                <BreakdownRow type="settlement" label="Fee collections" count={b.settlement?.count} vol={b.settlement?.volume} detail="Remitted to platform" last />
               </View>
             </View>
           )}
@@ -313,6 +324,14 @@ export default function PhysioWalletScreen() {
         maxToRenderPerBatch={8}
         windowSize={7}
         removeClippedSubviews
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.brand]}
+            tintColor={colors.brand}
+          />
+        }
       />
 
       {/* ── Withdrawal modal ── */}

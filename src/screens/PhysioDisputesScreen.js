@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import Toast from 'react-native-toast-message'
 import { api } from '../api/client'
@@ -21,6 +21,7 @@ export default function PhysioDisputesScreen() {
   const [list, setList] = useState(null)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -32,6 +33,12 @@ export default function PhysioDisputesScreen() {
       setList([])
     }
   }, [page])
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }, [load])
 
   useEffect(() => { load() }, [load])
 
@@ -56,8 +63,14 @@ export default function PhysioDisputesScreen() {
       <FlatList
       data={list}
       keyExtractor={(item) => String(item._id)}
-      onRefresh={load}
-      refreshing={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={[colors.brand]}
+          tintColor={colors.brand}
+        />
+      }
       style={styles.root}
       contentContainerStyle={list.length === 0 ? styles.emptyPad : styles.listPad}
       ListEmptyComponent={

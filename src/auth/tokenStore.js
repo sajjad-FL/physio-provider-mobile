@@ -106,19 +106,16 @@ export function getProfileCompleteSync() {
 }
 
 export async function hydrateFromStorage() {
-  console.log('[tokenStore.js] hydrateFromStorage started')
   try {
     const [t, r, pc] = await Promise.all([
       storageGetItem(TOKEN_KEY),
       storageGetItem(ROLE_KEY),
       storageGetItem(PROFILE_COMPLETE_KEY),
     ])
-    console.log('[tokenStore.js] hydrateFromStorage loaded keys:', { t: Boolean(t), r, pc })
     memoryToken = t || null
     memoryRole = r === 'physio' || r === 'admin' || r === 'user' ? r : r === 'patient' ? 'user' : 'user'
     memoryProfileComplete = pc === '1' ? true : pc === '0' ? false : null
   } catch (err) {
-    console.error('[tokenStore.js] hydrateFromStorage error:', err)
     memoryToken = null
     memoryRole = 'user'
     memoryProfileComplete = null

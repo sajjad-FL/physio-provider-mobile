@@ -24,7 +24,13 @@ import { normalizeIndianPhone } from '../utils/phoneIndia'
 import { matchesFilters } from '../utils/physioBookingHelpers'
 
 function listStatusLabel(b) {
-  if (b.sessionStatus === 'completed') return 'Completed'
+  if (b.sessionStatus === 'completed' || b.status === 'completed') return 'Completed'
+  if (b.status === 'assigned') {
+    if (b.planStatus === 'proposed') return 'Awaiting Approval'
+    if (b.planStatus === 'approved') return 'Awaiting Acceptance'
+    return 'Propose Plan'
+  }
+  if (b.status === 'pending' || b.planStatus === 'requested') return 'Propose Plan'
   if (b.rescheduled) return 'Rescheduled'
   return 'Scheduled'
 }
@@ -35,14 +41,36 @@ function patientInitial(name) {
 }
 
 function statusAccent(b) {
-  if (b.sessionStatus === 'completed') return colors.success
+  if (b.sessionStatus === 'completed' || b.status === 'completed') return colors.success
+  if (b.status === 'assigned') {
+    if (b.planStatus === 'proposed') return colors.blue600
+    if (b.planStatus === 'approved') return colors.warning
+    return colors.warning
+  }
+  if (b.status === 'pending' || b.planStatus === 'requested') return colors.warning
   if (b.rescheduled) return colors.warning
   return colors.brand
 }
 
 function statusChipColors(b) {
-  if (b.sessionStatus === 'completed') return { bg: colors.successBg, fg: colors.emerald700, border: '#a7f3d0' }
-  if (b.rescheduled) return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
+  if (b.sessionStatus === 'completed' || b.status === 'completed') {
+    return { bg: colors.successBg, fg: colors.emerald700, border: '#a7f3d0' }
+  }
+  if (b.status === 'assigned') {
+    if (b.planStatus === 'proposed') {
+      return { bg: colors.blue50, fg: colors.blue800, border: '#bfdbfe' }
+    }
+    if (b.planStatus === 'approved') {
+      return { bg: '#fff7ed', fg: '#c2410c', border: '#ffedd5' }
+    }
+    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
+  }
+  if (b.status === 'pending' || b.planStatus === 'requested') {
+    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
+  }
+  if (b.rescheduled) {
+    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
+  }
   return { bg: colors.teal50, fg: colors.teal800, border: colors.brandSoft }
 }
 
@@ -334,61 +362,49 @@ export default function PhysioBookingsScreen({ navigation }) {
           const svc = serviceChipColors(b)
           const st = statusChipColors(b)
           const accent = statusAccent(b)
+          const dateObj = b.date ? new Date(b.date + 'T00:00:00') : new Date()
+          const dayNum = dateObj.getDate()
+          const monStr = dateObj.toLocaleDateString('en-IN', { month: 'short' }).toUpperCase()
 
           return (
             <Pressable
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
               onPress={() => navigation.navigate('PhysioBookingDetail', { id: b._id })}
             >
-              {/* Status accent border */}
-              <View style={[styles.cardAccent, { backgroundColor: accent }]} />
+              {/* Left: visual date zone */}
+              <View style={[styles.cardDateZone, { backgroundColor: accent + '14' }]}>
+                <View style={[styles.cardDateZoneBar, { backgroundColor: accent }]} />
+                <View style={[styles.cardDateAvatar, { backgroundColor: accent }]}>
+                  <Text style={styles.cardDateAvatarTxt}>{patientInitial(b.userId?.name)}</Text>
+                </View>
+                <Text style={[styles.cardDayNum, { color: accent }]}>{dayNum}</Text>
+                <Text style={[styles.cardDayMon, { color: accent }]}>{monStr}</Text>
+              </View>
 
+              {/* Right: patient info */}
               <View style={styles.cardBody}>
-                {/* Top row: date + pills */}
-                <View style={styles.cardTopRow}>
-                  <View style={styles.cardDateWrap}>
-                    <Ionicons name="calendar-outline" size={12} color={colors.textTertiary} />
-                    <Text style={styles.cardDate}>{formatBookingDateAndSlot(b.date, b.timeSlot)}</Text>
+                <Text style={styles.cardPatientName} numberOfLines={1}>
+                  {b.userId?.name ?? '—'}
+                </Text>
+                {b.issue ? (
+                  <Text style={styles.cardIssue} numberOfLines={1}>{b.issue}</Text>
+                ) : null}
+                <Text style={styles.cardTimeText} numberOfLines={1}>
+                  {formatBookingDateAndSlot(b.date, b.timeSlot)}
+                </Text>
+                <View style={styles.cardPills}>
+                  <View style={[styles.pill, { backgroundColor: svc.bg, borderColor: svc.border }]}>
+                    <Text style={[styles.pillTxt, { color: svc.fg }]}>{svc.label}</Text>
                   </View>
-                  <View style={styles.cardPills}>
-                    <View style={[styles.pill, { backgroundColor: svc.bg, borderColor: svc.border }]}>
-                      <Text style={[styles.pillTxt, { color: svc.fg }]}>{svc.label}</Text>
-                    </View>
-                    <View style={[styles.pill, { backgroundColor: st.bg, borderColor: st.border }]}>
-                      <Text style={[styles.pillTxt, { color: st.fg }]}>{listStatusLabel(b)}</Text>
-                    </View>
+                  <View style={[styles.pill, { backgroundColor: st.bg, borderColor: st.border }]}>
+                    <Text style={[styles.pillTxt, { color: st.fg }]}>{listStatusLabel(b)}</Text>
                   </View>
                 </View>
+              </View>
 
-                {/* Patient + details */}
-                <View style={styles.cardPatientSection}>
-                  <View style={styles.cardPatientRow}>
-                    <View style={[styles.cardAvatar, { backgroundColor: accent + '22' }]}>
-                      <Text style={[styles.cardAvatarTxt, { color: accent }]}>
-                        {patientInitial(b.userId?.name)}
-                      </Text>
-                    </View>
-                    <View style={styles.cardPatientBody}>
-                      <Text style={styles.cardPatientName} numberOfLines={1}>
-                        {b.userId?.name ?? '—'}
-                      </Text>
-                      {b.issue ? (
-                        <Text style={styles.cardIssue} numberOfLines={1}>{b.issue}</Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <Pressable
-                    style={styles.cardDetailsLink}
-                    onPress={(e) => {
-                      e.stopPropagation?.()
-                      navigation.navigate('PhysioBookingDetail', { id: b._id })
-                    }}
-                  >
-                    <Text style={styles.cardDetailsTxt}>Details</Text>
-                    <Ionicons name="chevron-forward" size={13} color={colors.brand} />
-                  </Pressable>
-                </View>
+              {/* Chevron */}
+              <View style={styles.cardChevronWrap}>
+                <Ionicons name="chevron-forward" size={16} color={colors.slate200} />
               </View>
             </Pressable>
           )
@@ -430,43 +446,43 @@ const styles = StyleSheet.create({
   statsStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(240, 253, 250, 0.88)',
+    backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(13, 148, 136, 0.15)',
-    paddingVertical: 12,
+    borderColor: 'rgba(13, 148, 136, 0.12)',
+    paddingVertical: 14,
     paddingHorizontal: 6,
     marginBottom: 10,
     shadowColor: colors.brand,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    elevation: 3,
   },
   statPill: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 3,
     minWidth: 0,
   },
   statIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 7,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  statTextWrap: { minWidth: 0, flexShrink: 1 },
-  statValue: { fontFamily: font.bold, fontSize: type.sm, color: colors.textPrimary, lineHeight: 17 },
-  statLabel: { fontFamily: font.regular, fontSize: 8, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.3 },
-  statsDivider: { width: 1, height: 28, backgroundColor: 'rgba(13, 148, 136, 0.08)' },
+  statTextWrap: { minWidth: 0, flexShrink: 1, alignItems: 'center' },
+  statValue: { fontFamily: font.bold, fontSize: 20, color: colors.textPrimary, lineHeight: 24 },
+  statLabel: { fontFamily: font.regular, fontSize: 8, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statsDivider: { width: 1, height: 36, backgroundColor: 'rgba(13, 148, 136, 0.08)' },
 
   // Toolbar
   toolbar: {
-    backgroundColor: 'rgba(240, 253, 250, 0.88)',
+    backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(13, 148, 136, 0.15)',
@@ -574,67 +590,93 @@ const styles = StyleSheet.create({
   // Booking card
   card: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(240, 253, 250, 0.88)',
+    backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(13, 148, 136, 0.15)',
+    borderColor: 'rgba(13, 148, 136, 0.08)',
     marginBottom: 10,
     overflow: 'hidden',
-    shadowColor: colors.brand,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowColor: '#0d3d38',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.09,
+    shadowRadius: 10,
+    elevation: 3,
+    minHeight: 88,
   },
-  cardPressed: { opacity: 0.92 },
-  cardAccent: { width: 4, alignSelf: 'stretch', flexShrink: 0 },
-  cardBody: { flex: 1, padding: 14, gap: 8 },
+  cardPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
 
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  cardDateWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  cardDate: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.textPrimary },
-  cardPills: { flexDirection: 'row', gap: 5 },
-  pill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  pillTxt: { fontFamily: font.bold, fontSize: 9, letterSpacing: 0.3 },
-
-  cardPatientSection: { gap: 6 },
-  cardPatientRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  cardAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+  // Left date zone
+  cardDateZone: {
+    width: 68,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 1,
+    paddingVertical: 14,
     flexShrink: 0,
+    position: 'relative',
   },
-  cardAvatarTxt: { fontFamily: font.bold, fontSize: type.base },
-  cardPatientBody: { flex: 1, minWidth: 0 },
-  cardPatientName: { fontFamily: font.semiBold, fontSize: type.base, color: colors.textPrimary },
+  cardDateZoneBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+  },
+  cardDateAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 5,
+  },
+  cardDateAvatarTxt: {
+    fontFamily: font.bold,
+    fontSize: 15,
+    color: colors.white,
+  },
+  cardDayNum: {
+    fontFamily: font.bold,
+    fontSize: 19,
+    lineHeight: 22,
+  },
+  cardDayMon: {
+    fontFamily: font.semiBold,
+    fontSize: 9,
+    letterSpacing: 0.6,
+  },
+
+  // Right body
+  cardBody: { flex: 1, paddingVertical: 13, paddingHorizontal: 12, gap: 3, justifyContent: 'center' },
+  cardPatientName: { fontFamily: font.bold, fontSize: 17, color: colors.textPrimary, lineHeight: 22 },
   cardIssue: {
-    marginTop: 2,
     fontFamily: font.regular,
     fontSize: type.xs,
     color: colors.textTertiary,
     fontStyle: 'italic',
   },
-  cardDetailsLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-end',
-    gap: 3,
-    marginTop: 2,
+  cardTimeText: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: colors.slate400,
+    marginBottom: 3,
   },
-  cardDetailsTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
+  cardPills: { flexDirection: 'row', gap: 5, flexWrap: 'wrap' },
+  pill: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  pillTxt: { fontFamily: font.bold, fontSize: 9, letterSpacing: 0.3 },
+
+  // Chevron
+  cardChevronWrap: {
+    width: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
 
   // Error state
   errorCard: {

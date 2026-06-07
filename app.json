@@ -3,6 +3,7 @@
     "name": "PhysiOkhom Pro",
     "slug": "physiokhom-pro",
     "version": "1.0.0",
+    "icon": "./assets/images/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "physiokhomp",
@@ -19,7 +20,11 @@
       "bundleIdentifier": "com.physiokhom.physio",
       "jsEngine": "hermes",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": [
+          "whatsapp",
+          "maps"
+        ]
       }
     },
     "android": {

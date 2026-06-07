@@ -1,7 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import Toast from 'react-native-toast-message'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -255,6 +255,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
   const { id } = route.params || {}
   const [booking, setBooking] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [rescheduleRow, setRescheduleRow] = useState(null)
@@ -305,6 +306,12 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
       setLoading(false)
     }
   }, [id])
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }, [load])
 
   useEffect(() => { load() }, [load])
 
@@ -624,11 +631,19 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
         contentContainerStyle={[styles.pad, { paddingBottom: scrollBottomPad }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
-        bounces={false}
-        alwaysBounceVertical={false}
+        bounces={true}
+        alwaysBounceVertical={true}
         showsVerticalScrollIndicator
         {...(Platform.OS === 'android' ? { overScrollMode: 'never' } : {})}
         {...(Platform.OS === 'ios' ? { contentInsetAdjustmentBehavior: 'never' } : {})}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.brand]}
+            tintColor={colors.brand}
+          />
+        }
       >
 
         {/* ── Floating Hero Card ──────────────────────── */}
@@ -639,19 +654,19 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
               <Ionicons
                 name={b.serviceType === 'online' ? 'videocam' : 'home'}
                 size={11}
-                color={colors.brand}
+                color="rgba(255,255,255,0.85)"
               />
               <Text style={styles.premiumHeroServiceText}>
                 {b.serviceType === 'online' ? 'Online Session' : 'Home Visit'}
               </Text>
             </View>
             <View style={styles.premiumHeroStatusRow}>
-              <View style={[styles.premiumStatusBadge, { backgroundColor: colors.brandSoft }]}>
-                <Text style={[styles.premiumStatusText, { color: colors.brand }]}>{sessionStatusLabel(b)}</Text>
+              <View style={[styles.premiumStatusBadge, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+                <Text style={[styles.premiumStatusText, { color: 'rgba(255,255,255,0.90)' }]}>{sessionStatusLabel(b)}</Text>
               </View>
               {b.rescheduled ? (
-                <View style={[styles.premiumStatusBadge, { backgroundColor: colors.amber50 }]}>
-                  <Text style={[styles.premiumStatusText, { color: colors.amber800 }]}>Rescheduled</Text>
+                <View style={[styles.premiumStatusBadge, { backgroundColor: 'rgba(251,191,36,0.20)' }]}>
+                  <Text style={[styles.premiumStatusText, { color: '#fbbf24' }]}>Rescheduled</Text>
                 </View>
               ) : null}
             </View>
@@ -661,7 +676,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
           <View style={styles.premiumHeroMiddle}>
             {isAssigned ? (
               <View style={styles.assignedPlaceholder}>
-                <Ionicons name="lock-closed-outline" size={18} color={colors.slate400} />
+                <Ionicons name="lock-closed-outline" size={18} color="rgba(255,255,255,0.45)" />
                 <Text style={styles.assignedPlaceholderTxt}>Patient details are hidden until you accept the assignment.</Text>
               </View>
             ) : (
@@ -675,13 +690,13 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                   <Text style={styles.premiumPatientName} numberOfLines={1}>{b.userId?.name ?? '—'}</Text>
                   {b.userId?.phone ? (
                     <Pressable onPress={() => callPhone(b.userId.phone)} style={styles.premiumPhoneRow}>
-                      <Ionicons name="call-outline" size={12} color={colors.slate500} />
+                      <Ionicons name="call-outline" size={12} color="rgba(255,255,255,0.55)" />
                       <Text style={styles.premiumPatientPhone}>{b.userId.phone}</Text>
                     </Pressable>
                   ) : null}
                   {b.issue ? (
                     <View style={styles.premiumComplaintBadge}>
-                      <Ionicons name="medical-outline" size={11} color={colors.brand} />
+                      <Ionicons name="medical-outline" size={11} color="rgba(255,255,255,0.65)" />
                       <Text style={styles.premiumComplaintText} numberOfLines={1}>{b.issue}</Text>
                     </View>
                   ) : null}
@@ -693,7 +708,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
           {/* Bottom Row: Date & Slot Display */}
           <View style={styles.premiumHeroDivider} />
           <View style={styles.premiumHeroDateRow}>
-            <Ionicons name="time-outline" size={14} color={colors.slate600} />
+            <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.65)" />
             <Text style={styles.premiumHeroDateText}>{formatBookingDateAndSlot(b.date, b.timeSlot)}</Text>
           </View>
 
@@ -705,7 +720,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 disabled={!hasPhone}
                 onPress={() => callPhone(b.userId.phone)}
               >
-                <Ionicons name="call" size={14} color={hasPhone ? colors.brand : colors.slate300} />
+                <Ionicons name="call" size={14} color={hasPhone ? colors.white : 'rgba(255,255,255,0.35)'} />
                 <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>Call</Text>
               </Pressable>
 
@@ -714,8 +729,8 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 disabled={!hasPhone}
                 onPress={() => openWhatsApp(b.userId.phone)}
               >
-                <Ionicons name="logo-whatsapp" size={14} color={hasPhone ? '#16a34a' : colors.slate300} />
-                <Text style={[styles.premiumActionBtnTxt, { color: hasPhone ? '#16a34a' : colors.slate300 }]}>WhatsApp</Text>
+                <Ionicons name="logo-whatsapp" size={14} color={hasPhone ? colors.white : 'rgba(255,255,255,0.35)'} />
+                <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>WhatsApp</Text>
               </Pressable>
 
               {b.serviceType !== 'online' ? (
@@ -727,7 +742,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                     address: b.userId?.location,
                   })}
                 >
-                  <Ionicons name="navigate" size={14} color={canStartNavigation ? colors.brand : colors.slate300} />
+                  <Ionicons name="navigate" size={14} color={canStartNavigation ? colors.white : 'rgba(255,255,255,0.35)'} />
                   <Text style={[styles.premiumActionBtnTxt, !canStartNavigation && styles.premiumActionBtnTxtDisabled]}>Navigate</Text>
                 </Pressable>
               ) : null}
@@ -804,19 +819,23 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
               {/* Milestone payment progress */}
               {milestoneStatus && milestoneStatus.length > 0 ? (
                 <View style={styles.milestoneStrip}>
-                  {milestoneStatus.map((m) => (
-                    <View key={m.bySession} style={[styles.milestoneRow, m.met && styles.milestoneRowMet]}>
-                      <Ionicons
-                        name={m.met ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={13}
-                        color={m.met ? colors.success : colors.amber800}
-                      />
-                      <Text style={[styles.milestoneTxt, m.met && styles.milestoneTxtMet]}>
-                        {`Session ${m.bySession}: ${Math.round(m.requiredPct * 100)}% required`}
-                        {m.met ? ' — met' : ' — pending'}
-                      </Text>
-                    </View>
-                  ))}
+                  {milestoneStatus.map((m) => {
+                    const reqAmt = Math.ceil(m.requiredPct * totalAmount)
+                    const remainingToPay = Math.max(0, reqAmt - effectivePaid)
+                    return (
+                      <View key={m.bySession} style={[styles.milestoneRow, m.met && styles.milestoneRowMet]}>
+                        <Ionicons
+                          name={m.met ? 'checkmark-circle' : 'ellipse-outline'}
+                          size={13}
+                          color={m.met ? colors.success : colors.amber800}
+                        />
+                        <Text style={[styles.milestoneTxt, m.met && styles.milestoneTxtMet]}>
+                          {`Session ${m.bySession}: ₹${reqAmt.toLocaleString('en-IN')} required — `}
+                          {m.met ? 'met' : `pending (Patient needs to pay ₹${remainingToPay.toLocaleString('en-IN')})`}
+                        </Text>
+                      </View>
+                    )
+                  })}
                 </View>
               ) : null}
 
@@ -1081,52 +1100,63 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
           <View style={styles.tabContentGap}>
             {/* Payment progress card */}
             <View style={styles.stripeProgressCard}>
-              <View style={styles.stripeProgressHeader}>
-                <View>
+              {/* Dark header band */}
+              <View style={styles.stripeProgressHeaderBand}>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.stripeProgressTitle}>
                     {isOnlinePayment ? 'Payment Progress' : 'Collection Progress'}
                   </Text>
                   <Text style={styles.stripeProgressSub}>
-                    {isOnlinePayment
-                      ? 'Online installment tracking dashboard'
-                      : 'Offline collection tracking dashboard'}
+                    {isOnlinePayment ? 'Online installments' : 'Offline collections'}
                   </Text>
                 </View>
-                {outstanding > 0.009 ? (
-                  <View style={[
-                    styles.stripeOutstandingBadge,
-                    isOnlinePayment && styles.stripeOutstandingBadgeOnline,
-                  ]}>
-                    <Text style={[
-                      styles.stripeOutstandingBadgeTxt,
-                      isOnlinePayment && styles.stripeOutstandingBadgeTxtOnline,
+                <View style={styles.stripeProgressPctWrap}>
+                  <Text style={styles.stripeProgressPct}>{Math.round(paidPercent)}%</Text>
+                  {outstanding > 0.009 ? (
+                    <View style={[
+                      styles.stripeOutstandingBadge,
+                      isOnlinePayment && styles.stripeOutstandingBadgeOnline,
                     ]}>
-                      ₹{outstanding.toFixed(2)} Outstanding
-                    </Text>
-                  </View>
-                ) : null}
+                      <Text style={[
+                        styles.stripeOutstandingBadgeTxt,
+                        isOnlinePayment && styles.stripeOutstandingBadgeTxtOnline,
+                      ]}>
+                        ₹{outstanding.toFixed(0)} due
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.stripeOutstandingBadgeOnline}>
+                      <Text style={styles.stripeOutstandingBadgeTxtOnline}>Paid in full</Text>
+                    </View>
+                  )}
+                </View>
               </View>
 
-              {/* Progress bar split */}
+              {/* Full-width progress bar */}
               <View style={styles.stripeSplitBar}>
                 <View style={[styles.stripeSplitBarPaid, { width: `${paidPercent}%` }]} />
               </View>
 
+              {/* Metric chips row */}
               <View style={styles.stripeMetricsRow}>
                 <View style={styles.stripeMetric}>
                   <View style={[styles.stripeMetricDot, { backgroundColor: colors.success }]} />
                   <Text style={styles.stripeMetricLabel}>{isOnlinePayment ? 'Paid' : 'Collected'}</Text>
-                  <Text style={styles.stripeMetricVal}>₹{effectivePaid.toFixed(2)}</Text>
+                  <Text style={styles.stripeMetricVal}>₹{effectivePaid.toFixed(0)}</Text>
                 </View>
+                <View style={styles.stripeMetricDivider} />
                 <View style={styles.stripeMetric}>
-                  <View style={[styles.stripeMetricDot, { backgroundColor: colors.warning }]} />
+                  <View style={[styles.stripeMetricDot, { backgroundColor: outstanding > 0.009 ? colors.warning : colors.success }]} />
                   <Text style={styles.stripeMetricLabel}>Outstanding</Text>
-                  <Text style={styles.stripeMetricVal}>₹{outstanding.toFixed(2)}</Text>
+                  <Text style={[styles.stripeMetricVal, outstanding < 0.01 && { color: colors.success }]}>
+                    {outstanding < 0.01 ? '₹0' : `₹${outstanding.toFixed(0)}`}
+                  </Text>
                 </View>
+                <View style={styles.stripeMetricDivider} />
                 <View style={styles.stripeMetric}>
-                  <View style={[styles.stripeMetricDot, { backgroundColor: colors.slate400 }]} />
-                  <Text style={styles.stripeMetricLabel}>Total Value</Text>
-                  <Text style={styles.stripeMetricVal}>₹{totalAmount.toFixed(2)}</Text>
+                  <View style={[styles.stripeMetricDot, { backgroundColor: colors.brand }]} />
+                  <Text style={styles.stripeMetricLabel}>Total</Text>
+                  <Text style={styles.stripeMetricVal}>₹{totalAmount.toFixed(0)}</Text>
                 </View>
               </View>
             </View>
@@ -1136,14 +1166,17 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 <HomePlanFormPhysio booking={b} busy={busy} onSubmit={(payload) => createPlan(b._id, payload)} />
               ) : showPlanPending ? (
                 <View style={styles.planPendingCard}>
-                  <View style={styles.planPendingIconWrap}>
-                    <Ionicons name="hourglass-outline" size={28} color={colors.warning} />
+                  <View style={styles.planPendingBand}>
+                    <View style={styles.planPendingIconWrap}>
+                      <Ionicons name="hourglass-outline" size={26} color={colors.warning} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.planPendingTitle}>Awaiting approval</Text>
+                      <Text style={styles.planPendingBody}>
+                        Patient reviewing your {b.sessions}-session plan
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={styles.planPendingTitle}>Awaiting patient approval</Text>
-                  <Text style={styles.planPendingBody}>
-                    You submitted a plan with {b.sessions} session{b.sessions !== 1 ? 's' : ''} at ₹{b.amountPerSession}/session.
-                    The patient will review and approve it.
-                  </Text>
                   <View style={styles.planPendingKVs}>
                     <PlanKV label="Sessions" value={String(b.sessions ?? '—')} />
                     <PlanKV label="Fee/session" value={b.amountPerSession != null ? `₹${b.amountPerSession}` : '—'} />
@@ -1583,18 +1616,22 @@ const styles = StyleSheet.create({
 
   // ── Premium Hero Card ────────────────────────────
   premiumHeroCard: {
-    ...bookingCardSurface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    padding: 14,
+    borderRadius: 20,
+    backgroundColor: '#0d3d38',
+    padding: 16,
     marginTop: 8,
+    shadowColor: '#0d3d38',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.30,
+    shadowRadius: 18,
+    elevation: 8,
+    overflow: 'hidden',
   },
   premiumHeroTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   premiumHeroServiceBadge: {
     flexDirection: 'row',
@@ -1603,12 +1640,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3.5,
     borderRadius: 6,
-    backgroundColor: 'rgba(13, 148, 136, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
   },
   premiumHeroServiceText: {
     fontFamily: font.bold,
     fontSize: 9,
-    color: colors.brand,
+    color: 'rgba(255,255,255,0.85)',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -1641,46 +1678,46 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: font.regular,
     fontSize: type.sm,
-    color: colors.slate400,
+    color: 'rgba(255,255,255,0.45)',
     fontStyle: 'italic',
   },
   premiumAvatarRing: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(13, 148, 136, 0.25)',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(13, 148, 136, 0.04)',
+    backgroundColor: 'transparent',
   },
   premiumAvatarContainer: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.brandSoft,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.brand,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 4,
-    elevation: 1,
+    elevation: 2,
   },
   premiumAvatarText: {
     fontFamily: font.bold,
-    fontSize: 12,
-    color: colors.brand,
+    fontSize: 18,
+    color: '#0d3d38',
   },
   premiumPatientInfo: {
     flex: 1,
     minWidth: 0,
-    gap: 2,
+    gap: 3,
   },
   premiumPatientName: {
     fontFamily: font.bold,
-    fontSize: type.base,
-    color: colors.textPrimary,
+    fontSize: 22,
+    color: colors.white,
   },
   premiumPhoneRow: {
     flexDirection: 'row',
@@ -1690,7 +1727,7 @@ const styles = StyleSheet.create({
   premiumPatientPhone: {
     fontFamily: font.regular,
     fontSize: type.xs,
-    color: colors.slate600,
+    color: 'rgba(255,255,255,0.65)',
   },
   premiumComplaintBadge: {
     flexDirection: 'row',
@@ -1700,29 +1737,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
     marginTop: 2,
   },
   premiumComplaintText: {
     fontFamily: font.medium,
     fontSize: 10,
-    color: colors.slate700,
+    color: 'rgba(255,255,255,0.75)',
   },
   premiumHeroDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(15, 23, 42, 0.08)',
-    marginVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    marginVertical: 12,
   },
   premiumHeroDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   premiumHeroDateText: {
     fontFamily: font.semiBold,
     fontSize: type.sm,
-    color: colors.slate800,
+    color: 'rgba(255,255,255,0.85)',
   },
   premiumActionRow: {
     flexDirection: 'row',
@@ -1734,27 +1771,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingVertical: 11,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(13, 148, 136, 0.15)',
-    backgroundColor: colors.white,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   premiumActionBtnDisabled: {
-    opacity: 0.45,
+    opacity: 0.35,
   },
   premiumActionBtnTxt: {
     fontFamily: font.bold,
     fontSize: type.xs,
-    color: colors.brand,
+    color: colors.white,
   },
   premiumActionBtnTxtDisabled: {
-    color: colors.slate300,
+    color: 'rgba(255,255,255,0.35)',
   },
 
   // ── Banner ───────────────────────────────────────
@@ -1851,10 +1883,13 @@ const styles = StyleSheet.create({
   },
   segmentedContainer: {
     flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
-    marginTop: 10,
-    marginBottom: 10,
+    backgroundColor: 'rgba(241, 245, 249, 0.90)',
+    borderRadius: 14,
+    padding: 4,
+    marginTop: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(13, 148, 136, 0.07)',
   },
   segmentedTab: {
     flex: 1,
@@ -1863,16 +1898,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 10,
-    borderBottomWidth: 2,
+    borderRadius: 10,
+    borderBottomWidth: 0,
     borderBottomColor: 'transparent',
   },
   segmentedTabActive: {
-    borderBottomColor: colors.brand,
+    backgroundColor: colors.white,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    borderBottomColor: 'transparent',
   },
   segmentedTabTxt: {
     fontFamily: font.semiBold,
     fontSize: type.xs,
-    color: colors.slate500,
+    color: colors.slate400,
   },
   segmentedTabTxtActive: {
     fontFamily: font.bold,
@@ -1885,32 +1927,36 @@ const styles = StyleSheet.create({
   // ── Section titles ────────────────────────────────
   sectionTitleRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   sectionIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
-    backgroundColor: 'rgba(13, 148, 136, 0.08)',
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(13, 148, 136, 0.10)',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    marginTop: 1,
   },
   sectionTitleBody: { flex: 1, minWidth: 0 },
-  sectionTitleRight: { flexShrink: 0, marginTop: 2 },
+  sectionTitleRight: { flexShrink: 0 },
   h2: { fontFamily: font.bold, fontSize: type.base, color: colors.textPrimary },
-  sectionHint: { marginTop: 3, fontFamily: font.regular, fontSize: type.xs, color: colors.textSecondary, lineHeight: 16 },
+  sectionHint: { marginTop: 2, fontFamily: font.regular, fontSize: 11, color: colors.textTertiary },
 
   // ── Section cards ────────────────────────────────
   sectionCard: {
-    ...bookingCardSurface,
-    borderRadius: 16,
+    backgroundColor: colors.white,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     padding: 16,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
   },
   notesHeaderPress: { marginBottom: 4 },
 
@@ -1960,22 +2006,25 @@ const styles = StyleSheet.create({
 
   // ── Milestone payment schedule ────────────────────
   milestoneStrip: {
-    gap: 6,
+    gap: 8,
     marginBottom: 12,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(240,253,250,0.9)',
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(240,253,250,0.95)',
     borderWidth: 1,
     borderColor: 'rgba(13,148,136,0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.brand,
   },
   milestoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingVertical: 2,
+    gap: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 2,
   },
   milestoneRowMet: {},
-  milestoneTxt: { fontFamily: font.medium, fontSize: type.xs, color: colors.amber800 },
+  milestoneTxt: { flex: 1, fontFamily: font.medium, fontSize: 11, color: colors.amber800, lineHeight: 15 },
   milestoneTxtMet: { color: colors.success },
 
   // ── Payments ─────────────────────────────────────
@@ -2019,11 +2068,13 @@ const styles = StyleSheet.create({
   // ── Note editor ───────────────────────────────────
   noteEditorWrap: {
     marginBottom: 4,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(241, 245, 249, 0.5)',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#f8fffe',
     borderWidth: 1,
-    borderColor: 'rgba(13, 148, 136, 0.08)',
+    borderColor: 'rgba(13, 148, 136, 0.12)',
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(13, 148, 136, 0.35)',
   },
   noteEditorLabelRow: {
     flexDirection: 'row',
@@ -2032,22 +2083,27 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noteEditorLabel: {
-    fontFamily: font.semiBold,
-    fontSize: type.xs,
-    color: colors.textTertiary,
+    fontFamily: font.bold,
+    fontSize: 10,
+    color: colors.brand,
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    letterSpacing: 0.8,
   },
   noteEditorTs: { marginTop: 6, fontFamily: font.regular, fontSize: 9.5, color: colors.textTertiary },
   saveNoteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
     backgroundColor: colors.brand,
     flexShrink: 0,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.20,
+    shadowRadius: 4,
+    elevation: 2,
   },
   saveNoteBtnBusy: { opacity: 0.55 },
   saveNoteBtnTxt: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.white },
@@ -2295,42 +2351,52 @@ const styles = StyleSheet.create({
 
   // ── Plan tab ─────────────────────────────────────
   planPendingCard: {
-    ...bookingCardSurface,
-    borderRadius: 16,
+    backgroundColor: colors.white,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.warningBorder,
-    padding: 16,
+    overflow: 'hidden',
+    shadowColor: '#92400e',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  planPendingBand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.warningBg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.warningBorder,
+    padding: 14,
   },
   planPendingIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.warningBg,
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 8,
+    flexShrink: 0,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
   },
   planPendingTitle: {
     fontFamily: font.bold,
-    fontSize: type.lg,
-    color: colors.textPrimary,
-    textAlign: 'center',
-    marginBottom: 6,
+    fontSize: type.base,
+    color: colors.amber800,
   },
   planPendingBody: {
     fontFamily: font.regular,
-    fontSize: type.sm,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 16,
+    fontSize: type.xs,
+    color: colors.amber800,
+    lineHeight: 16,
+    marginTop: 2,
+    opacity: 0.80,
   },
   planPendingKVs: {
-    borderRadius: 12,
-    ...innerPanelSurface,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    backgroundColor: colors.white,
     overflow: 'hidden',
   },
   planApprovedCard: {
@@ -2386,8 +2452,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(13, 148, 136, 0.08)',
   },
@@ -2403,7 +2469,7 @@ const styles = StyleSheet.create({
   },
   planKVValueHL: {
     fontFamily: font.bold,
-    fontSize: type.base,
+    fontSize: type.lg,
     color: colors.brand,
   },
 
@@ -2437,7 +2503,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   stepperLeftCol: {
-    width: 26,
+    width: 34,
     alignItems: 'center',
     position: 'relative',
   },
@@ -2445,26 +2511,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    left: 12,
+    left: 16,
     width: 2,
     backgroundColor: colors.slate200,
   },
   stepperLineFirst: {
-    top: 13,
+    top: 17,
   },
   stepperLineLast: {
     bottom: 'auto',
-    height: 13,
+    height: 17,
   },
   stepperLineDone: {
     backgroundColor: colors.success,
+    width: 2,
   },
   stepperNode: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: colors.slate100,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.slate300,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2473,58 +2540,72 @@ const styles = StyleSheet.create({
   stepperNodeDone: {
     backgroundColor: colors.success,
     borderColor: colors.success,
+    shadowColor: colors.success,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
   stepperNodeNoShow: {
     backgroundColor: colors.danger,
     borderColor: colors.danger,
   },
   stepperNodeToday: {
-    backgroundColor: colors.brandSoft,
+    backgroundColor: 'rgba(13,148,136,0.10)',
     borderColor: colors.brand,
-    borderWidth: 1.5,
+    borderWidth: 2,
     shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 5,
   },
   stepperNodeTodayInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: colors.brand,
   },
   stepperCard: {
     flex: 1,
     marginLeft: 12,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     ...bookingCardSurface,
-    padding: 12,
+    padding: 14,
     shadowOpacity: Platform.OS === 'web' ? undefined : 0.04,
     elevation: 1,
   },
   stepperCardExpanded: {
-    borderColor: colors.brand + '45',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    borderColor: 'rgba(13,148,136,0.30)',
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
   },
   stepperCardDone: {
-    backgroundColor: 'rgba(16, 185, 129, 0.02)',
-    borderColor: 'rgba(16, 185, 129, 0.12)',
+    backgroundColor: 'rgba(16, 185, 129, 0.03)',
+    borderColor: 'rgba(16, 185, 129, 0.18)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.success,
   },
   stepperCardNoShow: {
     backgroundColor: 'rgba(239, 68, 68, 0.02)',
-    borderColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.danger,
   },
   stepperCardToday: {
-    borderColor: 'rgba(13, 148, 136, 0.25)',
-    backgroundColor: 'rgba(13, 148, 136, 0.02)',
+    borderColor: 'rgba(13, 148, 136, 0.30)',
+    backgroundColor: 'rgba(13, 148, 136, 0.025)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.brand,
     shadowColor: colors.brand,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
     elevation: 2,
   },
   stepperCardHeader: {
@@ -2540,37 +2621,45 @@ const styles = StyleSheet.create({
   },
   stepperSessionNum: {
     fontFamily: font.bold,
-    fontSize: type.sm,
+    fontSize: 15,
     color: colors.textPrimary,
+    lineHeight: 20,
   },
   stepperSessionNumDone: {
     color: colors.success,
   },
   stepperSessionDate: {
     fontFamily: font.regular,
-    fontSize: type.xs,
+    fontSize: 11,
     color: colors.slate500,
     marginTop: 2,
   },
   stepperStatusBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
     backgroundColor: colors.slate100,
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.06)',
   },
   stepperStatusBadgeDone: {
-    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    backgroundColor: 'rgba(16, 185, 129, 0.10)',
+    borderColor: 'rgba(16, 185, 129, 0.20)',
   },
   stepperStatusBadgeNoShow: {
     backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.18)',
   },
   stepperStatusBadgeToday: {
-    backgroundColor: 'rgba(13, 148, 136, 0.08)',
+    backgroundColor: 'rgba(13, 148, 136, 0.10)',
+    borderColor: 'rgba(13, 148, 136, 0.22)',
   },
   stepperStatusText: {
     fontFamily: font.bold,
-    fontSize: 8,
+    fontSize: 9,
     color: colors.slate600,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   stepperStatusTextDone: {
     color: colors.success,
@@ -2642,28 +2731,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 8,
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(13, 148, 136, 0.25)',
-    backgroundColor: 'rgba(13, 148, 136, 0.04)',
+    backgroundColor: 'rgba(13, 148, 136, 0.06)',
   },
   stepperCollectBtnTxt: {
     fontFamily: font.semiBold,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.brand,
   },
   stepperCompleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 8,
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    borderRadius: 10,
     backgroundColor: colors.brand,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.20,
+    shadowRadius: 6,
+    elevation: 3,
   },
   stepperCompleteBtnHalf: {
     flex: 1,
@@ -2674,7 +2768,7 @@ const styles = StyleSheet.create({
   },
   stepperCompleteBtnTxt: {
     fontFamily: font.bold,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.white,
   },
   stepperPrimaryBtn: {
@@ -2707,24 +2801,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 9,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     backgroundColor: colors.white,
   },
   stepperSecondaryBtnTxt: {
     fontFamily: font.semiBold,
-    fontSize: type.xs,
+    fontSize: 12,
     color: colors.slate800,
   },
   stepperReschedBtn: {
-    borderColor: 'rgba(13, 148, 136, 0.15)',
-    backgroundColor: 'rgba(13, 148, 136, 0.02)',
+    borderColor: 'rgba(13, 148, 136, 0.18)',
+    backgroundColor: 'rgba(13, 148, 136, 0.04)',
   },
   stepperNoShowBtn: {
-    borderColor: 'rgba(239, 68, 68, 0.15)',
-    backgroundColor: 'rgba(239, 68, 68, 0.02)',
+    borderColor: 'rgba(239, 68, 68, 0.18)',
+    backgroundColor: 'rgba(239, 68, 68, 0.03)',
   },
   stepperBtnDisabled: {
     opacity: 0.45,
@@ -2776,88 +2870,115 @@ const styles = StyleSheet.create({
 
   // ── Stripe billing card ──────────────────────────
   stripeProgressCard: {
-    ...bookingCardSurface,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    padding: 16,
+    overflow: 'hidden',
+    backgroundColor: colors.white,
+    shadowColor: '#0d3d38',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    elevation: 4,
   },
-  stripeProgressHeader: {
+  stripeProgressHeaderBand: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    backgroundColor: '#0d3d38',
+    padding: 16,
+    paddingBottom: 14,
+    gap: 12,
   },
   stripeProgressTitle: {
     fontFamily: font.bold,
-    fontSize: type.sm,
-    color: colors.textPrimary,
+    fontSize: type.base,
+    color: colors.white,
   },
   stripeProgressSub: {
     fontFamily: font.regular,
     fontSize: type.xs,
-    color: colors.slate500,
+    color: 'rgba(255,255,255,0.50)',
     marginTop: 2,
+  },
+  stripeProgressPctWrap: {
+    alignItems: 'flex-end',
+    gap: 5,
+    flexShrink: 0,
+  },
+  stripeProgressPct: {
+    fontFamily: font.bold,
+    fontSize: 30,
+    color: colors.white,
+    lineHeight: 34,
   },
   stripeOutstandingBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: colors.warningBg,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(251,191,36,0.18)',
     borderWidth: 1,
-    borderColor: colors.warningBorder,
+    borderColor: 'rgba(251,191,36,0.28)',
   },
   stripeOutstandingBadgeOnline: {
-    backgroundColor: colors.teal50,
-    borderColor: 'rgba(13, 148, 136, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
   stripeOutstandingBadgeTxt: {
     fontFamily: font.bold,
     fontSize: 10,
-    color: colors.warning,
+    color: '#fbbf24',
   },
   stripeOutstandingBadgeTxtOnline: {
-    color: colors.brand,
+    fontFamily: font.bold,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.75)',
   },
   stripeSplitBar: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.slate100,
+    height: 10,
+    backgroundColor: 'rgba(13,61,56,0.12)',
     overflow: 'hidden',
-    marginBottom: 8,
   },
   stripeSplitBarPaid: {
     height: '100%',
     backgroundColor: colors.success,
-    borderRadius: 4,
   },
   stripeMetricsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    ...innerPanelSurface,
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    backgroundColor: colors.white,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
   },
   stripeMetric: {
-    alignItems: 'flex-start',
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  stripeMetricDivider: {
+    width: 1,
+    backgroundColor: 'rgba(13,148,136,0.10)',
+    alignSelf: 'stretch',
+    marginVertical: 4,
   },
   stripeMetricDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginBottom: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   stripeMetricLabel: {
     fontFamily: font.regular,
     fontSize: 10,
-    color: colors.slate500,
+    color: colors.slate400,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   stripeMetricVal: {
     fontFamily: font.bold,
-    fontSize: type.xs,
+    fontSize: 17,
     color: colors.textPrimary,
-    marginTop: 2,
   },
 })
