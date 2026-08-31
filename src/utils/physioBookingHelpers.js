@@ -16,7 +16,7 @@ export function normalizeSessionRows(b) {
         sessionId: s._id != null ? String(s._id) : null,
         date: s.date,
         time: s.time,
-        n: i + 1,
+        n: 0,
         notes: s.notes || null,
         status: s.status || 'scheduled',
         completedAt: s.completedAt || null,
@@ -25,7 +25,12 @@ export function normalizeSessionRows(b) {
         paymentAtCompletion: Number(s.paymentAtCompletion || 0),
         perSession: true,
       }))
-      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+      .sort((a, bRow) => {
+        const byDate = String(a.date || '').localeCompare(String(bRow.date || ''))
+        if (byDate !== 0) return byDate
+        return String(a.time || '').localeCompare(String(bRow.time || ''))
+      })
+      .map((row, i) => ({ ...row, n: i + 1 }))
   }
   return [
     {
