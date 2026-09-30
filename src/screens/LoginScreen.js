@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -28,6 +29,7 @@ import { colors } from '../theme/colors'
 import { font, type, leading } from '../theme/typography'
 import { useAuth } from '../context/AuthContext'
 import { useKeyboardAwareScroll } from '../hooks/useKeyboardAwareScroll'
+import RequiredMark from '../components/ui/RequiredMark'
 
 function digitsOnly(text, maxLen) {
   const d = String(text || '').replace(/\D/g, '')
@@ -48,7 +50,23 @@ export default function LoginScreen({ navigation }) {
   const phoneInputRef = useRef(null)
   const passwordInputRef = useRef(null)
   const { authEpoch } = useAuth()
-  const { padBottom, scrollViewProps, keyboardAvoidingViewProps } = useKeyboardAwareScroll()
+  const passwordBlockRef = useRef(null)
+  const { padBottom, scrollViewProps, keyboardAvoidingViewProps, scrollIntoView } = useKeyboardAwareScroll({
+    scrollToEndOnShow: false,
+    extraBottomPadding: 40,
+  })
+
+  // Same as patient app: keep the password block near the top once the keyboard is up.
+  const revealPasswordField = useCallback(() => {
+    scrollIntoView(passwordBlockRef, { offset: 96 })
+  }, [scrollIntoView])
+
+  useEffect(() => {
+    if (!passFocused) return undefined
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const sub = Keyboard.addListener(showEvent, revealPasswordField)
+    return () => sub.remove()
+  }, [passFocused, revealPasswordField])
 
   useEffect(() => {
     if (getTokenSync()) {
@@ -148,8 +166,8 @@ export default function LoginScreen({ navigation }) {
                 resizeMode="contain"
               />
               <Text numberOfLines={1}>
-                <Text style={styles.brandPhysio}>PhysiO</Text>
-                <Text style={styles.brandKhom}>khom</Text>
+                <Text style={styles.brandPhysio}>Physi</Text>
+                <Text style={styles.brandKhom}>Okhom</Text>
                 <Text style={{ fontFamily: font.bold, fontSize: type.lg, color: colors.textSecondary, letterSpacing: -0.3 }}> Pro</Text>
               </Text>
             </View>
@@ -159,6 +177,7 @@ export default function LoginScreen({ navigation }) {
 
         <ScrollView
           {...scrollViewProps}
+          style={styles.scrollView}
           contentContainerStyle={[styles.scroll, { paddingBottom: padBottom }]}
         >
 
@@ -184,8 +203,8 @@ export default function LoginScreen({ navigation }) {
             ) : null}
 
             {/* Mobile field */}
-            <View>
-              <Text style={styles.fieldLabel}>Mobile number</Text>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Mobile number<RequiredMark /></Text>
               <Pressable
                 onPress={() => phoneInputRef.current?.focus()}
                 style={[
@@ -207,22 +226,31 @@ export default function LoginScreen({ navigation }) {
                   textContentType="telephoneNumber"
                   autoComplete="tel"
                   importantForAutofill="yes"
+                  returnKeyType="next"
+                  blurOnSubmit={false}
                   autoCorrect={false}
                   maxLength={10}
                   value={phone}
                   onChangeText={(txt) => setPhone(digitsOnly(txt, 10))}
                   onFocus={() => setPhoneFocused(true)}
                   onBlur={() => setPhoneFocused(false)}
+                  onSubmitEditing={() => {
+                    passwordInputRef.current?.focus()
+                    revealPasswordField()
+                  }}
                 />
               </Pressable>
               {fieldErrors.phone ? <Text style={styles.fieldErrTxt}>{fieldErrors.phone}</Text> : null}
             </View>
 
             {/* Password field */}
-            <View style={styles.fieldGap}>
-              <Text style={styles.fieldLabel}>Password</Text>
+            <View ref={passwordBlockRef} collapsable={false} style={[styles.fieldBlock, styles.fieldGap]}>
+              <Text style={styles.fieldLabel}>Password<RequiredMark /></Text>
               <Pressable
-                onPress={() => passwordInputRef.current?.focus()}
+                onPress={() => {
+                  passwordInputRef.current?.focus()
+                  revealPasswordField()
+                }}
                 style={[
                   styles.passField,
                   passFocused && styles.fieldFocused,
@@ -239,11 +267,16 @@ export default function LoginScreen({ navigation }) {
                   textContentType="password"
                   autoComplete="password"
                   importantForAutofill="yes"
+                  returnKeyType="done"
                   autoCorrect={false}
                   value={password}
                   onChangeText={setPassword}
-                  onFocus={() => setPassFocused(true)}
+                  onFocus={() => {
+                    setPassFocused(true)
+                    revealPasswordField()
+                  }}
                   onBlur={() => setPassFocused(false)}
+                  onSubmitEditing={handleSubmit}
                 />
                 <Pressable
                   onPress={() => setShowPassword((v) => !v)}
@@ -367,7 +400,7 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    backgroundColor: colors.white,
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -382,16 +415,17 @@ const styles = StyleSheet.create({
   },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 80 },
   backTxt: { fontFamily: font.medium, fontSize: type.base, color: colors.brand },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   logoMark: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
   },
-  brandPhysio: { fontFamily: font.bold, fontSize: type.lg, color: colors.textPrimary, letterSpacing: -0.3 },
+  brandPhysio: { fontFamily: font.bold, fontSize: type.lg, color: '#0f172a', letterSpacing: -0.3 },
   brandKhom: { fontFamily: font.bold, fontSize: type.lg, color: colors.brand, letterSpacing: -0.3 },
   headerSpacer: { minWidth: 80 },
 
-  scroll: { paddingHorizontal: 16, paddingTop: 24 },
+  scrollView: { flex: 1 },
+  scroll: { paddingHorizontal: 16, paddingTop: 24, flexGrow: 1 },
 
   // Hero section
   heroSection: { alignItems: 'center', gap: 10, marginBottom: 24, zIndex: 2 },
@@ -427,6 +461,7 @@ const styles = StyleSheet.create({
   formCard: {
     ...authFormCard,
     zIndex: 2,
+    marginBottom: 20,
   },
 
   // Alert banner
@@ -450,8 +485,9 @@ const styles = StyleSheet.create({
   },
 
   // Form fields
+  fieldBlock: { zIndex: 0 },
   fieldLabel: { marginBottom: 6, fontFamily: font.medium, fontSize: type.base, color: colors.textPrimary },
-  fieldGap: { marginTop: 12 },
+  fieldGap: { marginTop: 16, zIndex: 1 },
   mobileField: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -471,6 +507,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: 'rgba(241, 245, 249, 0.6)',
     paddingRight: 4,
+    overflow: 'hidden',
   },
   fieldFocused: { 
     borderColor: colors.brand, 

@@ -1,6 +1,13 @@
 import FilterSheet from '../ui/FilterSheet'
 import { DEFAULT_PHYSIO_FILTERS } from '../../constants/physioBookingFilters'
 
+/** Server-side filter (GET /physio/bookings?workflow=) — same options as web PhysioBookingsFilterDrawer. */
+const WORKFLOW_ROW = [
+  { value: 'all', label: 'All bookings' },
+  { value: 'action', label: 'Needs action' },
+  { value: 'waiting', label: 'Waiting on patient' },
+  { value: 'active', label: 'In treatment' },
+]
 const STATUS_ROW = [
   { value: 'all', label: 'All' },
   { value: 'scheduled', label: 'Scheduled' },
@@ -21,6 +28,15 @@ const DATE_ROW = [
 
 export default function PhysioFilterModal({ visible, draft, setDraft, onClose }) {
   const sections = [
+    {
+      key: 'workflow',
+      label: 'Workflow',
+      options: WORKFLOW_ROW.map((x) => ({
+        ...x,
+        active: draft.workflow === x.value,
+        onPress: () => setDraft((prev) => ({ ...prev, workflow: x.value })),
+      })),
+    },
     {
       key: 'status',
       label: 'Status',

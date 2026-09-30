@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Platform, StyleSheet, Text, View } from 'react-native'
 import { colors } from '../../theme/colors'
-import { font, type } from '../../theme/typography'
+import { font, type, leading } from '../../theme/typography'
 import { getSessionMilestoneMessage, getSessionProgress } from '../../utils/sessionProgress'
 
 const cardSurface = Platform.select({
@@ -38,7 +38,7 @@ export default function SessionProgressPhysio({ booking }) {
         <View>
           <Text style={styles.h3}>Session progress</Text>
           <Text style={styles.big}>{label}</Text>
-          <Text style={styles.sub}>{Math.round(percent)}% of the care plan</Text>
+          <Text style={styles.sub}>{Math.round(percent)}% of your plan</Text>
         </View>
         {isComplete ? (
           <View style={styles.donePill}>
@@ -50,6 +50,7 @@ export default function SessionProgressPhysio({ booking }) {
         <View style={[styles.fill, { width: `${barPct}%`, backgroundColor: colorsMap.fill }]} />
       </View>
       <Text style={styles.msg}>{message}</Text>
+      <Text style={styles.foot}>Progress reflects scheduled visits through today until your plan is marked complete.</Text>
     </View>
   )
 }
@@ -69,9 +70,9 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
   },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
-  h3: { fontFamily: font.bold, fontSize: type.xs, color: colors.slate500, textTransform: 'uppercase', letterSpacing: 0.7 },
-  big: { marginTop: 4, fontFamily: font.bold, fontSize: type.md, color: colors.slate900 },
-  sub: { marginTop: 2, fontFamily: font.medium, fontSize: type.xs, color: colors.slate500 },
+  h3: { fontFamily: font.semiBold, fontSize: type.base, color: colors.slate900 },
+  big: { marginTop: 4, fontFamily: font.bold, fontSize: type['2xl'], lineHeight: leading['2xl'], color: colors.slate900 },
+  sub: { marginTop: 2, fontFamily: font.regular, fontSize: type.base, color: colors.slate500 },
   donePill: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -80,14 +81,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#a7f3d0',
   },
-  doneTxt: { fontFamily: font.bold, fontSize: 9, color: colors.emerald900, textTransform: 'uppercase' },
+  doneTxt: { fontFamily: font.bold, fontSize: type.xs, color: colors.emerald900, textTransform: 'uppercase' },
   track: {
-    marginTop: 10,
-    height: 6,
-    borderRadius: 3,
+    marginTop: 16,
+    height: 12,
+    borderRadius: 6,
     borderWidth: 1,
     overflow: 'hidden',
   },
-  fill: { height: '100%', borderRadius: 3 },
-  msg: { marginTop: 8, fontFamily: font.regular, fontSize: type.xs, color: colors.slate500, lineHeight: 14 },
+  fill: { height: '100%', borderRadius: 6 },
+  msg: { marginTop: 12, fontFamily: font.regular, fontSize: type.base, lineHeight: leading.base, color: colors.slate600 },
+  foot: { marginTop: 8, fontFamily: font.regular, fontSize: type.xs, lineHeight: leading.xs, color: colors.slate400 },
 })

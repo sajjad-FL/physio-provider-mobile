@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Keyboard, Platform } from 'react-native'
+import { Dimensions, Keyboard, Platform } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const KEYBOARD_SHOW = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
@@ -22,11 +22,33 @@ export function useKeyboardAwareScroll({
 } = {}) {
   const insets = useSafeAreaInsets()
   const scrollRef = useRef(null)
+  const scrollYRef = useRef(0)
   const [keyboardHeight, setKeyboardHeight] = useState(0)
+  // Android: how far the ScrollView runs under the keyboard (edge-to-edge disables adjustResize).
+  const [androidInset, setAndroidInset] = useState(0)
+  const androidInsetRef = useRef(0)
+  const insetsRef = useRef(insets)
+  insetsRef.current = insets
 
   const scrollBottomIntoView = useCallback(() => {
     requestAnimationFrame(() => {
       scrollRef.current?.scrollToEnd({ animated: true })
+    })
+  }, [])
+
+  /** Scroll so `targetRef` sits `offset` px below the top of the ScrollView viewport (same as patient app). */
+  const scrollIntoView = useCallback((targetRef, { offset = 0 } = {}) => {
+    requestAnimationFrame(() => {
+      const scroll = scrollRef.current
+      const target = targetRef?.current ?? targetRef
+      if (!scroll || !target?.measureInWindow || !scroll.measureInWindow) return
+
+      target.measureInWindow((_tx, ty) => {
+        scroll.measureInWindow((_sx, sy) => {
+          const nextY = Math.max(0, scrollYRef.current + (ty - sy) - offset)
+          scroll.scrollTo({ y: nextY, animated: true })
+        })
+      })
     })
   }, [])
 
@@ -35,12 +57,32 @@ export function useKeyboardAwareScroll({
     const onShow = (e) => {
       const h = e?.endCoordinates?.height ?? 0
       setKeyboardHeight(h)
+      if (Platform.OS === 'android') {
+        // Shrink the container so the ScrollView viewport ends at the keyboard top; Android's
+        // ScrollView then keeps the focused input visible (on open and when switching fields).
+        // endCoordinates.screenY can be the full screen bottom under edge-to-edge; height (IME minus
+        // nav bar) is reliable, so derive the keyboard top from it and take the higher of the two.
+        const winH = Dimensions.get('window').height
+        const fromHeight = winH - h - insetsRef.current.bottom
+        const kbTop = Math.min(e?.endCoordinates?.screenY ?? winH, fromHeight)
+        // FlatList refs don't expose measureInWindow; use their underlying ScrollView.
+        const node = scrollRef.current?.getNativeScrollRef?.() ?? scrollRef.current
+        node?.measureInWindow?.((_x, y, _w, height) => {
+          const next = Math.max(0, androidInsetRef.current + y + height - kbTop)
+          androidInsetRef.current = next
+          setAndroidInset(next)
+        })
+      }
       if (scrollToEndOnShow) {
         if (timeoutId) clearTimeout(timeoutId)
         timeoutId = setTimeout(scrollBottomIntoView, Platform.OS === 'ios' ? 120 : 80)
       }
     }
-    const onHide = () => setKeyboardHeight(0)
+    const onHide = () => {
+      setKeyboardHeight(0)
+      androidInsetRef.current = 0
+      setAndroidInset(0)
+    }
 
     const showSub = Keyboard.addListener(KEYBOARD_SHOW, onShow)
     const hideSub = Keyboard.addListener(KEYBOARD_HIDE, onHide)
@@ -53,7 +95,8 @@ export function useKeyboardAwareScroll({
   }, [scrollBottomIntoView, scrollToEndOnShow])
 
   const basePadBottom = Math.max(insets.bottom, minBottomInset) + extraBottomPadding
-  const padBottom = basePadBottom + keyboardHeight
+  // Android shrinks the container instead (androidInset), so no extra content padding there.
+  const padBottom = basePadBottom + (Platform.OS === 'ios' ? keyboardHeight : 0)
   const keyboardVerticalOffset =
     Platform.OS === 'ios' ? (iosHeaderOffset ?? iosHeaderKeyboardOffset(insets)) : 0
 
@@ -63,10 +106,14 @@ export function useKeyboardAwareScroll({
     keyboardDismissMode: 'on-drag',
     showsVerticalScrollIndicator: false,
     automaticallyAdjustKeyboardInsets: Platform.OS === 'ios',
+    scrollEventThrottle: 16,
+    onScroll: (e) => {
+      scrollYRef.current = e.nativeEvent.contentOffset.y
+    },
   }
 
   const keyboardAvoidingViewProps = {
-    style: { flex: 1 },
+    style: { flex: 1, paddingBottom: androidInset },
     behavior: Platform.OS === 'ios' ? 'padding' : undefined,
     keyboardVerticalOffset,
   }
@@ -78,5 +125,6 @@ export function useKeyboardAwareScroll({
     keyboardVerticalOffset,
     scrollViewProps,
     keyboardAvoidingViewProps,
+    scrollIntoView,
   }
 }

@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { colors } from '../../theme/colors'
+import { font, type, leading } from '../../theme/typography'
 
 export default function PhysioApprovalBanner({ rejected, onPressOnboarding, onPressProfile }) {
   return (
@@ -25,7 +26,7 @@ export default function PhysioApprovalBanner({ rejected, onPressOnboarding, onPr
           {rejected ? (
             <>
               <Text style={styles.p}>
-                Your application was rejected. Update documents from onboarding or edit your profile.
+                Your application was rejected. Update your documents and details, then resubmit from onboarding — or contact support if you need help.
               </Text>
               <View style={styles.actions}>
                 <Pressable style={[styles.btn, styles.btnPri]} onPress={onPressOnboarding}>
@@ -39,8 +40,7 @@ export default function PhysioApprovalBanner({ rejected, onPressOnboarding, onPr
           ) : (
             <>
               <Text style={styles.p}>
-                Bookings, wallet, and availability stay locked until you&apos;re approved. You can still update profile
-                and onboarding.
+                An admin is reviewing your application. Bookings, wallet, and availability stay locked until you&apos;re approved. You can still update your profile and onboarding documents.
               </Text>
               <Text style={styles.tip}>Tip: complete every onboarding step to speed up review.</Text>
             </>
@@ -69,9 +69,9 @@ const styles = StyleSheet.create({
   },
   iconTxt: { fontSize: 18 },
   body: { flex: 1 },
-  title: { fontSize: 16, fontWeight: '700' },
-  p: { marginTop: 8, fontSize: 13, lineHeight: 19, color: colors.slate900 },
-  tip: { marginTop: 10, fontSize: 11, fontWeight: '600', color: colors.amber800 },
+  title: { fontFamily: font.semiBold, fontSize: type.lg, lineHeight: leading.lg },
+  p: { marginTop: 8, fontFamily: font.regular, fontSize: type.base, lineHeight: leading.base, color: colors.slate900 },
+  tip: { marginTop: 10, fontFamily: font.medium, fontSize: type.sm, lineHeight: leading.sm, color: colors.amber800 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   btn: {
     paddingVertical: 10,
@@ -79,11 +79,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   btnPri: { backgroundColor: '#b91c1c' },
-  btnPriTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnPriTxt: { color: '#fff', fontFamily: font.semiBold, fontSize: type.base },
   btnOut: {
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: '#fecaca',
   },
-  btnOutTxt: { color: '#7f1d1d', fontWeight: '700', fontSize: 13 },
+  btnOutTxt: { color: '#7f1d1d', fontFamily: font.semiBold, fontSize: type.base },
 })

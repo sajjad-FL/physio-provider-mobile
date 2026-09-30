@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { usePhysioWorkspaceOptional } from '../context/PhysioWorkspaceContext'
+import Toast from 'react-native-toast-message'
+import { isRouteLockedWhilePending, usePhysioWorkspaceOptional } from '../context/PhysioWorkspaceContext'
 import { colors } from '../theme/colors'
 import { font, type } from '../theme/typography'
 
@@ -70,6 +71,10 @@ export default function PhysioMoreScreen({ navigation }) {
   const firstName = physioName.split(' ')[0] || 'Doctor'
 
   function go(screen) {
+    if (ws?.me && !ws.platformApproved && isRouteLockedWhilePending(screen)) {
+      Toast.show({ type: 'info', text1: 'Available after approval', text2: 'An admin is reviewing your application.' })
+      return
+    }
     const root = navigation.getParent()?.getParent()
     if (root) root.navigate(screen)
     else navigation.navigate(screen)

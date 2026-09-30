@@ -29,7 +29,7 @@ function Screen({
     minBottomInset: 16,
     iosHeaderOffset,
   })
-  const rootStyle = [styles.root, bg ? { backgroundColor: bg } : null, style]
+  const rootStyle = [keyboardAvoidingViewProps.style, styles.root, bg ? { backgroundColor: bg } : null, style]
 
   const inner = scroll ? (
     <ScrollView

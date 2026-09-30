@@ -1,7 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { Ionicons } from '@expo/vector-icons'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView as RNScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import Toast from 'react-native-toast-message'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -9,16 +9,22 @@ import { api } from '../api/client'
 import HomePlanFormPhysio from '../components/physio/HomePlanFormPhysio'
 import InstallmentsPhysioCard from '../components/physio/InstallmentsPhysioCard'
 import SessionProgressPhysio from '../components/physio/SessionProgressPhysio'
+import SessionProgressModal from '../components/physio/SessionProgressModal'
+import { formatProgressHistoryLine } from '../constants/assessmentForm'
 import { DAILY_SLOTS } from '../constants/slots'
 import { colors } from '../theme/colors'
-import { font, type } from '../theme/typography'
+import { font, type, leading } from '../theme/typography'
 import {
   marketplacePaymentStatusLabel,
   paymentAmountLabel,
   paymentModeLabel,
   paymentStatusLabel,
-  sessionStatusLabel,
+  billingTypeLabel,
+  bookingCodeBadge,
 } from '../utils/bookingDisplay'
+import { isPlanLive } from '../utils/planStatus'
+import { buildSessionPaymentMap, defaultCollectionSessionId } from '../utils/sessionPaymentMap'
+import { buildPhysioWorkflowSteps, defaultPhysioOpenStep, physioPageContext } from '../utils/physioBookingWorkflow'
 import { formatBookingDateAndSlot, formatBookingTimeSlot } from '../utils/date'
 import { openGoogleMapsDestination } from '../utils/googleMaps'
 import { normalizeSessionRows } from '../utils/physioBookingHelpers'
@@ -56,37 +62,82 @@ const RESCHEDULE_SLOT_OPTIONS = DAILY_SLOTS.map((s) => ({
   label: formatBookingTimeSlot(s),
 }))
 
-const BASE_TABS = [
-  { key: 'treatment', label: 'Treatment Hub', icon: 'medical-outline', iconOn: 'medical' },
-  { key: 'finance', label: 'Plan & Billing', icon: 'card-outline', iconOn: 'card' },
-]
+/** Workflow badge tones — same palette as web badgeToneClass. */
+const TONE = {
+  urgent: { bg: colors.amber50, fg: colors.amber950, border: colors.amber200 },
+  action: { bg: colors.teal50, fg: colors.teal800, border: colors.brandSoft },
+  waiting: { bg: colors.blue50, fg: colors.blue700, border: '#bfdbfe' },
+  progress: { bg: colors.emerald50, fg: colors.emerald900, border: '#a7f3d0' },
+  muted: { bg: colors.slate50, fg: colors.slate700, border: colors.slate200 },
+}
 
-const TabBar = memo(function TabBar({ activeTab, onChange, tabs, badges = {} }) {
+/** Row status pills — web BookingSessionTimeline statusBadgeClass/statusLabel. */
+const ROW_PILL = {
+  completed: { label: 'Completed', bg: colors.emerald50, fg: colors.emerald900, border: '#a7f3d0' },
+  no_show: { label: 'No-show', bg: colors.rose50, fg: colors.rose900, border: '#fecdd3' },
+  rescheduled: { label: 'Rescheduled', bg: colors.amber50, fg: colors.amber950, border: colors.amber200 },
+  scheduled: { label: 'Scheduled', bg: colors.slate50, fg: colors.slate700, border: colors.slate200 },
+}
+
+/** Mirrors web BookingWorkflowStepRail (numbered circles: done ✓ / waiting / current / upcoming). */
+const StepRail = memo(function StepRail({ steps, openStep, onSelect }) {
   return (
-    <View style={styles.segmentedContainer}>
-      {tabs.map((tab) => {
-        const active = activeTab === tab.key
-        const hasBadge = badges[tab.key]
+    <View style={styles.railRow}>
+      {steps.map((step) => {
+        const isOpen = openStep === step.id
+        const done = step.state === 'done'
+        const waiting = step.state === 'waiting'
+        const current = step.state === 'current'
+        const circle = done
+          ? styles.railCircleDone
+          : waiting
+          ? styles.railCircleWaiting
+          : current || isOpen
+          ? styles.railCircleCurrent
+          : styles.railCircleUpcoming
+        const circleTxt = done || current || isOpen ? colors.white : waiting ? colors.blue700 : colors.slate400
         return (
           <Pressable
-            key={tab.key}
+            key={step.id}
             accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            style={[styles.segmentedTab, active && styles.segmentedTabActive]}
-            onPress={() => onChange(tab.key)}
+            accessibilityState={{ selected: isOpen }}
+            onPress={() => onSelect(step.id)}
+            style={[styles.railItem, isOpen && styles.railItemOpen]}
           >
-            <View style={styles.tabIconWrap}>
-              <Ionicons
-                name={active ? tab.iconOn : tab.icon}
-                size={13}
-                color={active ? colors.brand : colors.slate400}
-              />
-              {hasBadge && !active ? <View style={styles.tabBadgeDot} /> : null}
+            <View style={[styles.railCircle, circle]}>
+              <Text style={[styles.railCircleTxt, { color: waiting && !isOpen ? colors.blue700 : circleTxt }]}>
+                {done ? '✓' : step.num}
+              </Text>
             </View>
-            <Text style={[styles.segmentedTabTxt, active && styles.segmentedTabTxtActive]}>{tab.label}</Text>
+            <Text style={[styles.railLabel, isOpen && { color: colors.teal800 }]} numberOfLines={1}>
+              {step.label}
+            </Text>
+            <Text style={styles.railHint} numberOfLines={1}>{step.hint}</Text>
           </Pressable>
         )
       })}
+    </View>
+  )
+})
+
+const GridCell = memo(function GridCell({ k, v, strong }) {
+  return (
+    <View style={styles.wfGridCell}>
+      <Text style={styles.wfGridK}>{k}</Text>
+      <Text style={[styles.wfGridV, strong && { fontFamily: font.semiBold }]}>{v}</Text>
+    </View>
+  )
+})
+
+/** Mirrors web PlanSummaryGrid. */
+const PlanSummaryGrid = memo(function PlanSummaryGrid({ b }) {
+  return (
+    <View style={styles.wfGrid}>
+      <GridCell k="Sessions" v={String(b.sessions ?? '—')} strong />
+      {b.amountPerSession != null ? <GridCell k="Per session" v={`₹${Number(b.amountPerSession).toFixed(0)}`} strong /> : null}
+      {b.discountPercent != null && b.discountPercent > 0 ? <GridCell k="Discount" v={`${b.discountPercent}%`} strong /> : null}
+      <GridCell k="Total" v={paymentAmountLabel(b)} strong />
+      {billingTypeLabel(b) ? <GridCell k="Payment type" v={billingTypeLabel(b)} strong /> : null}
     </View>
   )
 })
@@ -125,11 +176,6 @@ function iosSupportsCompactDate() {
   if (typeof v === 'number') return v >= 14
   const n = parseFloat(String(v))
   return !Number.isNaN(n) && n >= 14
-}
-
-function patientInitial(name) {
-  const s = (name || '?').trim()
-  return s ? s.slice(0, 1).toUpperCase() : '?'
 }
 
 function openWhatsApp(phone) {
@@ -173,83 +219,6 @@ const BookingDetailChrome = memo(function BookingDetailChrome({ navigation, inse
   )
 })
 
-const SectionTitle = memo(function SectionTitle({ title, hint, icon = 'information-circle-outline', right }) {
-  return (
-    <View style={styles.sectionTitleRow}>
-      <View style={styles.sectionIconWrap}>
-        <Ionicons name={icon} size={14} color={colors.brand} />
-      </View>
-      <View style={styles.sectionTitleBody}>
-        <Text style={styles.h2}>{title}</Text>
-        {hint ? <Text style={styles.sectionHint}>{hint}</Text> : null}
-      </View>
-      {right ? <View style={styles.sectionTitleRight}>{right}</View> : null}
-    </View>
-  )
-})
-
-const SessionNoteEditor = memo(function SessionNoteEditor({ row, onSaved }) {
-  const [text, setText] = useState(row.notes?.text || '')
-  const [busy, setBusy] = useState(false)
-  const [meta, setMeta] = useState({ updatedAt: row.notes?.updatedAt })
-  const [focused, setFocused] = useState(false)
-
-  async function save() {
-    if (!row.sessionId) {
-      Toast.show({ type: 'error', text1: 'Session reference missing' })
-      return
-    }
-    setBusy(true)
-    try {
-      const res = await api.patch(`/sessions/${row.sessionId}/notes`, { text })
-      const n = res.data?.notes
-      if (n) setMeta({ updatedAt: n.updatedAt })
-      Toast.show({ type: 'success', text1: 'Notes saved' })
-      onSaved?.()
-    } catch (e) {
-      Toast.show({ type: 'error', text1: e.response?.data?.message || 'Could not save' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <View style={styles.noteEditorWrap}>
-      <View style={styles.noteEditorLabelRow}>
-        <Text style={styles.noteEditorLabel}>Clinical Notes</Text>
-        <Pressable
-          style={[styles.saveNoteBtn, busy && styles.saveNoteBtnBusy]}
-          onPress={save}
-          disabled={busy}
-          hitSlop={4}
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={colors.textTertiary} />
-          ) : (
-            <>
-              <Ionicons name="cloud-upload-outline" size={13} color={colors.white} />
-              <Text style={styles.saveNoteBtnTxt}>Save</Text>
-            </>
-          )}
-        </Pressable>
-      </View>
-      <TextInput
-        style={[styles.ta, focused && styles.taFocused]}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        multiline
-        value={text}
-        onChangeText={setText}
-        placeholder="Observations, exercises, follow-up…"
-        placeholderTextColor={colors.slate400}
-      />
-      <Text style={styles.noteEditorTs}>
-        {meta.updatedAt ? `Saved ${new Date(meta.updatedAt).toLocaleString('en-IN')}` : 'Not saved yet'}
-      </Text>
-    </View>
-  )
-})
-
 export default function PhysioBookingDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets()
   const { id } = route.params || {}
@@ -274,22 +243,13 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
   const [recordErr, setRecordErr] = useState('')
   const [recordBusy, setRecordBusy] = useState(false)
   const [notesExpanded, setNotesExpanded] = useState(true)
-  const [activeTab, setActiveTab] = useState('treatment')
   const [noShowFocused, setNoShowFocused] = useState(false)
   const [recordAmountFocused, setRecordAmountFocused] = useState(false)
   const [recordNoteFocused, setRecordNoteFocused] = useState(false)
-  const [expandedSessionId, setExpandedSessionId] = useState(null)
+  const [notesRow, setNotesRow] = useState(null)
+  const [confirmCompleteRow, setConfirmCompleteRow] = useState(null)
 
 
-  useEffect(() => {
-    if (booking) {
-      const rows = normalizeSessionRows(booking)
-      const activeRow = rows.find(r => r.status !== 'completed' && r.status !== 'no_show') || rows[0]
-      if (activeRow) {
-        setExpandedSessionId(String(activeRow.sessionId || activeRow.key))
-      }
-    }
-  }, [booking])
 
   const load = useCallback(async () => {
     if (!id) return
@@ -315,93 +275,78 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
 
   useEffect(() => { load() }, [load])
 
-  const showCreatePlan = useMemo(() => {
-    if (!booking) return false
-    return (
-      booking.serviceType === 'home' &&
-      (booking.planStatus === 'requested' || booking.planStatus === 'rejected' || booking.planStatus == null)
-    )
-  }, [booking])
-
-  const hasSchedulePlan = useMemo(
-    () => Array.isArray(booking?.schedule) && booking.schedule.length > 0,
-    [booking],
-  )
-
   const paymentSummary = booking?.paymentSummary || null
   const paymentsList = useMemo(() => (Array.isArray(booking?.payments) ? booking.payments : []), [booking])
-  const sessionsCount = paymentSummary?.sessionsCount || (hasSchedulePlan ? booking.schedule.length : 1)
-  const isOfflinePlan = booking?.serviceType === 'home' && booking?.homePlanPaymentMode === 'offline'
-  const isOnlinePayment = !isOfflinePlan
-  const totalAmount = Number(
-    paymentSummary?.totalAmount ?? booking?.totalAmount ?? booking?.payment?.amount ?? 0,
-  )
-  const totalPaid = Number(paymentSummary?.totalPaid ?? booking?.totalPaid ?? 0)
-  const totalCollected = Number(paymentSummary?.totalCollected ?? 0)
-  const effectivePaid = totalPaid + totalCollected
-  const outstanding = Math.max(0, totalAmount - effectivePaid)
-  const paidPercent = totalAmount > 0 ? Math.min(100, (effectivePaid / totalAmount) * 100) : 0
-  const milestoneStatus = paymentSummary?.milestoneStatus ?? null
-  const showInstallments =
-    booking?.planStatus === 'approved' || booking?.serviceType === 'online' || paymentsList.length > 0
+  const outstanding = Number(paymentSummary?.outstanding || 0)
 
-  const hasPaymentForSession = useCallback(
-    (sessionId) => {
-      if (!sessionId) return false
-      return paymentsList.some(
-        (p) =>
-          String(p.sessionId) === String(sessionId) &&
-          ['collected', 'verified'].includes(p.status),
-      )
-    },
-    [paymentsList],
-  )
+  // Same derivation as web PhysioBookingDetailPage → drives the "Your checklist" steps.
+  const pageCtx = useMemo(() => {
+    if (!booking) return null
+    const sessionsCount =
+      booking.paymentSummary?.sessionsCount ||
+      (Array.isArray(booking.schedule) && booking.schedule.length > 0 ? booking.schedule.length : 1)
+    const unlockedSessions = Number(
+      booking.paymentSummary?.unlockedSessions ?? booking.paymentSummary?.coveredSessions ?? 0,
+    )
+    const isOfflinePlan = booking.serviceType === 'home' && booking.homePlanPaymentMode === 'offline'
+    const isHomeCare = booking.serviceType === 'home'
+    const paymentGateSkipped = Boolean(booking.managerId || isHomeCare)
+    const showInstallments =
+      isPlanLive(booking.planStatus) ||
+      booking.serviceType === 'online' ||
+      (Array.isArray(booking.payments) && booking.payments.length > 0)
 
-  function openRecordCollectionForSession(row) {
-    setRecordSessionId(row?.sessionId ? String(row.sessionId) : '__general__')
-    setRecordAmount('')
+    let paymentBlockReason = ''
+    if (!paymentGateSkipped) {
+      const ps = booking.paymentSummary
+      if (!ps && booking.paymentStatus !== 'held') {
+        paymentBlockReason = 'Payment must be secured before completion'
+      } else if (ps && unlockedSessions <= 0) {
+        paymentBlockReason = 'Collect at least one installment before completing any session.'
+      }
+    }
+
+    return physioPageContext(booking, {
+      sessionsCount,
+      unlockedSessions,
+      isOfflinePlan,
+      paymentGateSkipped,
+      paymentBlockReason,
+      showInstallments,
+      canMarkComplete: booking.sessionStatus !== 'completed' && !paymentBlockReason,
+      sessionPaymentMap: buildSessionPaymentMap(
+        booking,
+        Array.isArray(booking.payments) ? booking.payments : [],
+        booking.paymentSummary,
+      ),
+    })
+  }, [booking])
+
+  const steps = useMemo(() => (pageCtx ? buildPhysioWorkflowSteps(pageCtx) : []), [pageCtx])
+  const [openStep, setOpenStep] = useState('patient')
+  const [stepReady, setStepReady] = useState(false)
+
+  useEffect(() => {
+    setStepReady(false)
+    setOpenStep('patient')
+  }, [id])
+
+  useEffect(() => {
+    if (!steps.length || stepReady) return
+    setOpenStep(defaultPhysioOpenStep(steps))
+    setStepReady(true)
+  }, [steps, stepReady])
+
+  function openRecordCollection(row) {
+    const out = roundMoney2(outstanding)
+    const per = roundMoney2(Number(paymentSummary?.amountPerSession || 0))
+    setRecordAmount(out <= 0 ? '' : per > 0 ? String(Math.min(per, out)) : String(out))
+    const sid = row?.sessionId || (pageCtx ? defaultCollectionSessionId(booking, pageCtx.sessionPaymentMap, per) : null)
+    setRecordSessionId(sid ? String(sid) : '__general__')
     setRecordNote('')
     setRecordErr('')
     setRecordCollectionOpen(true)
   }
-
-  function requestCompleteSession(row) {
-    if (!booking || !row) return
-    const sessionPaymentMissing = Boolean(row.sessionId && !hasPaymentForSession(row.sessionId))
-    const needsWarning =
-      isOfflinePlan && outstanding > 0.009 && sessionPaymentMissing
-
-    if (needsWarning) {
-      Alert.alert(
-        `No payment recorded for Session ${row.n}`,
-        `Outstanding is ₹${outstanding.toFixed(2)}. Did you collect anything for this session?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Record collection',
-            onPress: () => openRecordCollectionForSession(row),
-          },
-          {
-            text: 'Complete without payment',
-            style: 'destructive',
-            onPress: () => {
-              if (row.perSession) completeOneSession(row)
-              else completeSession(booking._id)
-            },
-          },
-        ],
-      )
-      return
-    }
-
-    if (row.perSession) completeOneSession(row)
-    else completeSession(booking._id)
-  }
-
-  const showPlanPending = useMemo(() => {
-    if (!booking) return false
-    return booking.serviceType === 'home' && booking.planStatus === 'proposed'
-  }, [booking])
 
   async function completeSession(bookingId) {
     setBusyId(bookingId)
@@ -482,6 +427,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
       await api.patch(`/bookings/${bookingId}/create-plan`, payload)
       Toast.show({ type: 'success', text1: 'Plan submitted to patient' })
       await load()
+      setOpenStep('sessions')
     } catch (e) {
       Toast.show({ type: 'error', text1: e.response?.data?.message || 'Could not create plan' })
     } finally {
@@ -608,22 +554,84 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
     )
   }
 
-  const b = booking
+  const {
+    b,
+    isOnline,
+    planLive,
+    hasSchedulePlan,
+    showCreatePlan,
+    showPlanPending,
+    payments,
+    sessionsCount,
+    unlockedSessions,
+    isOfflinePlan,
+    paymentGateSkipped,
+    paymentBlockReason,
+    showInstallments,
+    canMarkComplete,
+    sessionPaymentMap,
+    workflowMeta,
+    rows,
+  } = pageCtx
   const busy = busyId === b._id
-  // isAssigned drives the Accept/Decline gate.
-  // If planStatus is already 'proposed', the physio already engaged with the booking —
-  // treat it as accepted regardless of the stored status to avoid locking into the
-  // assignment-pending view if the status update was delayed.
-  const isAssigned = b.status === 'assigned' && b.planStatus !== 'proposed' && b.planStatus !== 'approved'
+  // App-only: auto-assigned bookings (status 'assigned') need accept/decline — the web has no UI for it.
+  const isAssigned = b.status === 'assigned' && !b.managerId
   const canStartNavigation = Boolean(b.userId?.coordinates || String(b.userId?.location || '').trim())
   const hasPhone = Boolean(b.userId?.phone)
+  const activeStepMeta = steps.find((s) => s.id === openStep)
+  const tday = todayYmd()
   const scrollBottomPad = 14 + insets.bottom + 14
+  const tone = TONE[workflowMeta.tone] || TONE.muted
+
+  function rowBlockedReason(row) {
+    if (paymentGateSkipped) return ''
+    if (!paymentSummary) return ''
+    const ordinal = row?.perSession ? Number(row.n || 0) : 1
+    if (ordinal <= 0) return ''
+    if (ordinal > unlockedSessions) {
+      return unlockedSessions === 0
+        ? `Session #${ordinal} is locked. Collect at least one installment to open it.`
+        : `Session #${ordinal} is locked. Currently unlocked: up to #${unlockedSessions} of ${sessionsCount}.`
+    }
+    return ''
+  }
+
+  function onCompleteRow(row) {
+    if (paymentBlockReason) {
+      Toast.show({ type: 'error', text1: paymentBlockReason })
+      return
+    }
+    confirmComplete(row)
+  }
+
+  // Same confirmation as web PhysioBookingDetailPage before marking a visit complete.
+  function confirmComplete(row) {
+    setConfirmCompleteRow(row)
+  }
+
+  function submitConfirmedComplete() {
+    const row = confirmCompleteRow
+    setConfirmCompleteRow(null)
+    if (row?.perSession) completeOneSession(row)
+    else completeSession(b._id)
+  }
+
+  function onNoShowRow(row) {
+    if (paymentBlockReason) {
+      Toast.show({ type: 'error', text1: paymentBlockReason })
+      return
+    }
+    if (row.perSession) {
+      setNoShowReason('')
+      setNoShowRow(row)
+    }
+  }
 
   return (
     <BookingDetailChrome
       navigation={navigation}
       insetsTop={insets.top}
-      title={isAssigned ? 'Assignment Pending' : (b.userId?.name || 'Booking')}
+      title={b.userId?.name || 'Booking'}
       subtitle={formatBookingDateAndSlot(b.date, b.timeSlot)}
     >
       <ScrollView
@@ -637,120 +645,31 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
         {...(Platform.OS === 'android' ? { overScrollMode: 'never' } : {})}
         {...(Platform.OS === 'ios' ? { contentInsetAdjustmentBehavior: 'never' } : {})}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[colors.brand]}
-            tintColor={colors.brand}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.brand]} tintColor={colors.brand} />
         }
       >
-
-        {/* ── Floating Hero Card ──────────────────────── */}
-        <View style={styles.premiumHeroCard}>
-          {/* Top row: Badges */}
-          <View style={styles.premiumHeroTop}>
-            <View style={styles.premiumHeroServiceBadge}>
-              <Ionicons
-                name={b.serviceType === 'online' ? 'videocam' : 'home'}
-                size={11}
-                color="rgba(255,255,255,0.85)"
-              />
-              <Text style={styles.premiumHeroServiceText}>
-                {b.serviceType === 'online' ? 'Online Session' : 'Home Visit'}
+        {/* ── Header (web: patient, code, condition, date · location, workflow badge) ── */}
+        <View style={styles.wfCard}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+            <Text style={styles.wfBackLink}>← All bookings</Text>
+          </Pressable>
+          <View style={styles.wfHeadRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.wfName}>{b.userId?.name || 'Patient'}</Text>
+              {bookingCodeBadge(b) ? <Text style={styles.wfCode}>{bookingCodeBadge(b)}</Text> : null}
+              <Text style={styles.wfIssue}>{b.issue || '—'}</Text>
+              <Text style={styles.wfMeta}>
+                {formatBookingDateAndSlot(b.date, b.timeSlot)}
+                {b.userId?.location ? ` · ${b.userId.location}` : ''}
               </Text>
             </View>
-            <View style={styles.premiumHeroStatusRow}>
-              <View style={[styles.premiumStatusBadge, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-                <Text style={[styles.premiumStatusText, { color: 'rgba(255,255,255,0.90)' }]}>{sessionStatusLabel(b)}</Text>
-              </View>
-              {b.rescheduled ? (
-                <View style={[styles.premiumStatusBadge, { backgroundColor: 'rgba(251,191,36,0.20)' }]}>
-                  <Text style={[styles.premiumStatusText, { color: '#fbbf24' }]}>Rescheduled</Text>
-                </View>
-              ) : null}
+            <View style={[styles.wfBadge, { backgroundColor: tone.bg, borderColor: tone.border }]}>
+              <Text style={[styles.wfBadgeTxt, { color: tone.fg }]}>{workflowMeta.label}</Text>
             </View>
           </View>
-
-          {/* Main Content: Avatar + Name + Details */}
-          <View style={styles.premiumHeroMiddle}>
-            {isAssigned ? (
-              <View style={styles.assignedPlaceholder}>
-                <Ionicons name="lock-closed-outline" size={18} color="rgba(255,255,255,0.45)" />
-                <Text style={styles.assignedPlaceholderTxt}>Patient details are hidden until you accept the assignment.</Text>
-              </View>
-            ) : (
-              <>
-                <View style={styles.premiumAvatarRing}>
-                  <View style={styles.premiumAvatarContainer}>
-                    <Text style={styles.premiumAvatarText}>{patientInitial(b.userId?.name)}</Text>
-                  </View>
-                </View>
-                <View style={styles.premiumPatientInfo}>
-                  <Text style={styles.premiumPatientName} numberOfLines={1}>{b.userId?.name ?? '—'}</Text>
-                  {b.userId?.phone ? (
-                    <Pressable onPress={() => callPhone(b.userId.phone)} style={styles.premiumPhoneRow}>
-                      <Ionicons name="call-outline" size={12} color="rgba(255,255,255,0.55)" />
-                      <Text style={styles.premiumPatientPhone}>{b.userId.phone}</Text>
-                    </Pressable>
-                  ) : null}
-                  {b.issue ? (
-                    <View style={styles.premiumComplaintBadge}>
-                      <Ionicons name="medical-outline" size={11} color="rgba(255,255,255,0.65)" />
-                      <Text style={styles.premiumComplaintText} numberOfLines={1}>{b.issue}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              </>
-            )}
-          </View>
-
-          {/* Bottom Row: Date & Slot Display */}
-          <View style={styles.premiumHeroDivider} />
-          <View style={styles.premiumHeroDateRow}>
-            <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.65)" />
-            <Text style={styles.premiumHeroDateText}>{formatBookingDateAndSlot(b.date, b.timeSlot)}</Text>
-          </View>
-
-          {/* Action pill bar — hidden until assignment is accepted */}
-          {!isAssigned ? (
-            <View style={styles.premiumActionRow}>
-              <Pressable
-                style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
-                disabled={!hasPhone}
-                onPress={() => callPhone(b.userId.phone)}
-              >
-                <Ionicons name="call" size={14} color={hasPhone ? colors.white : 'rgba(255,255,255,0.35)'} />
-                <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>Call</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.premiumActionBtn, !hasPhone && styles.premiumActionBtnDisabled]}
-                disabled={!hasPhone}
-                onPress={() => openWhatsApp(b.userId.phone)}
-              >
-                <Ionicons name="logo-whatsapp" size={14} color={hasPhone ? colors.white : 'rgba(255,255,255,0.35)'} />
-                <Text style={[styles.premiumActionBtnTxt, !hasPhone && styles.premiumActionBtnTxtDisabled]}>WhatsApp</Text>
-              </Pressable>
-
-              {b.serviceType !== 'online' ? (
-                <Pressable
-                  style={[styles.premiumActionBtn, !canStartNavigation && styles.premiumActionBtnDisabled]}
-                  disabled={!canStartNavigation}
-                  onPress={() => openGoogleMapsDestination({
-                    coordinates: b.userId?.coordinates,
-                    address: b.userId?.location,
-                  })}
-                >
-                  <Ionicons name="navigate" size={14} color={canStartNavigation ? colors.white : 'rgba(255,255,255,0.35)'} />
-                  <Text style={[styles.premiumActionBtnTxt, !canStartNavigation && styles.premiumActionBtnTxtDisabled]}>Navigate</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null}
         </View>
 
-        {/* ── Accept assignment banner ───────────────── */}
+        {/* ── Accept assignment banner (app-only; backend requires a response) ── */}
         {isAssigned ? (
           <View style={styles.assignmentBanner}>
             <View style={styles.assignmentBannerTop}>
@@ -785,497 +704,344 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
           </View>
         ) : null}
 
-        {/* ── Plan pending banner & tabs — hidden until assignment accepted ── */}
-        {!isAssigned ? (
-          <>
-            {showPlanPending ? (
-              <View style={styles.bannerMint}>
-                <Ionicons name="time-outline" size={14} color={colors.teal800} />
-                <Text style={styles.bannerMintTxt}>Awaiting patient approval on the proposed plan.</Text>
-              </View>
+        {/* ── Your checklist ── */}
+        <View style={styles.wfCard}>
+          <Text style={styles.wfKicker}>YOUR CHECKLIST</Text>
+          <StepRail steps={steps} openStep={openStep} onSelect={setOpenStep} />
+        </View>
+
+        {/* ── Active step panel ── */}
+        <View style={styles.wfCard}>
+          <View style={styles.wfPanelHead}>
+            <Text style={styles.wfStepKicker}>
+              STEP {activeStepMeta?.num || 1} OF {steps.length}
+            </Text>
+            <Text style={styles.wfPanelTitle}>{activeStepMeta?.label}</Text>
+            {activeStepMeta?.state === 'waiting' ? (
+              <Text style={styles.wfWaitingTxt}>Waiting on the patient to approve the care plan.</Text>
             ) : null}
+          </View>
 
-            <TabBar
-              activeTab={activeTab}
-              onChange={setActiveTab}
-              tabs={BASE_TABS}
-              badges={{ finance: showCreatePlan }}
-            />
-          </>
-        ) : null}
+          {openStep === 'patient' ? (
+            <View style={styles.wfStack}>
+              <View style={styles.wfBoxMuted}>
+                <Text style={styles.wfBoxLabel}>CONTACT</Text>
+                <Text style={styles.wfBoxTitle}>{b.userId?.name ?? '—'}</Text>
+                <Text style={styles.wfBoxText}>{b.userId?.phone ?? '—'}</Text>
+                {b.userId?.location ? <Text style={[styles.wfBoxText, { marginTop: 6 }]}>{b.userId.location}</Text> : null}
+                <View style={styles.wfBtnRow}>
+                  <Pressable
+                    style={[styles.wfOutlineBtn, !hasPhone && styles.stepperBtnDisabled]}
+                    disabled={!hasPhone}
+                    onPress={() => callPhone(b.userId.phone)}
+                  >
+                    <Ionicons name="call-outline" size={13} color={colors.teal800} />
+                    <Text style={styles.wfOutlineBtnTxt}>Call</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.wfOutlineBtn, !hasPhone && styles.stepperBtnDisabled]}
+                    disabled={!hasPhone}
+                    onPress={() => openWhatsApp(b.userId.phone)}
+                  >
+                    <Ionicons name="logo-whatsapp" size={13} color={colors.teal800} />
+                    <Text style={styles.wfOutlineBtnTxt}>WhatsApp</Text>
+                  </Pressable>
+                  {b.serviceType === 'home' ? (
+                    <Pressable
+                      style={[styles.wfOutlineBtn, !canStartNavigation && styles.stepperBtnDisabled]}
+                      disabled={!canStartNavigation}
+                      onPress={() => openGoogleMapsDestination({ coordinates: b.userId?.coordinates, address: b.userId?.location })}
+                    >
+                      <Ionicons name="navigate-outline" size={13} color={colors.teal800} />
+                      <Text style={styles.wfOutlineBtnTxt}>Start navigation</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+              <View style={styles.wfBox}>
+                <Text style={styles.wfBoxLabel}>CONDITION</Text>
+                <Text style={[styles.wfBoxText, { color: colors.slate800 }]}>{b.issue || '—'}</Text>
+              </View>
+              <View style={styles.wfChipRow}>
+                <View style={styles.wfChip}>
+                  <Text style={styles.wfChipTxt}>{b.serviceType === 'online' ? 'Online' : 'Home visit'}</Text>
+                </View>
+                <View style={styles.wfChip}>
+                  <Text style={styles.wfChipTxt}>Hold: {paymentStatusLabel(b.paymentStatus)}</Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
 
-        {/* ── Treatment Hub Tab ─────────────────────────── */}
-        {!isAssigned && activeTab === 'treatment' ? (
-          <View style={styles.tabContentGap}>
-            <SessionProgressPhysio booking={b} />
+          {openStep === 'plan' && !isOnline ? (
+            <View style={styles.wfStack}>
+              {showPlanPending ? (
+                <Text style={[styles.wfNote, styles.wfNoteBlue]}>
+                  Plan sent — waiting for the patient to consent before sessions can proceed.
+                </Text>
+              ) : null}
+              {showCreatePlan ? (
+                <HomePlanFormPhysio booking={b} busy={busy} onSubmit={(payload) => createPlan(b._id, payload)} />
+              ) : null}
+              {planLive && !showCreatePlan ? (
+                <>
+                  <Text style={styles.wfBoxText}>Active care plan for this patient.</Text>
+                  <PlanSummaryGrid b={b} />
+                </>
+              ) : null}
+              {!planLive && !showCreatePlan && !showPlanPending ? (
+                <Text style={[styles.wfNote, styles.wfNoteAmber]}>
+                  {b.managerId
+                    ? 'Care manager will prepare the plan after assessment.'
+                    : 'Create a home plan when you are ready to propose sessions and pricing.'}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
+          {openStep === 'sessions' ? (
+            <View style={styles.wfStack}>
+              {!planLive && !isOnline && !hasSchedulePlan ? (
+                <Text style={styles.wfBoxText}>Sessions open after the care plan is live.</Text>
+              ) : null}
 
-            <View style={styles.sectionCard}>
-              <SectionTitle
-                title="Session Timeline"
-                hint="Tap any session card to expand clinical notes and actions."
-                icon="calendar-outline"
-              />
-              {/* Milestone payment progress */}
-              {milestoneStatus && milestoneStatus.length > 0 ? (
-                <View style={styles.milestoneStrip}>
-                  {milestoneStatus.map((m) => {
-                    const reqAmt = Math.ceil(m.requiredPct * totalAmount)
-                    const remainingToPay = Math.max(0, reqAmt - effectivePaid)
+              <SessionProgressPhysio booking={b} />
+
+              {paymentSummary && !paymentGateSkipped && unlockedSessions < sessionsCount ? (
+                <Text style={[styles.wfNote, styles.wfNoteBlue, { fontSize: type.xs }]}>
+                  {unlockedSessions === 0
+                    ? 'Collect at least one installment to unlock session #1.'
+                    : `You can mark up to session #${unlockedSessions} of ${sessionsCount}. Collect the next installment to open more.`}
+                </Text>
+              ) : null}
+
+              <View style={styles.wfBoxMuted}>
+                <Text style={styles.wfBoxTitleSm}>Visit schedule</Text>
+                <Text style={styles.wfBoxHint}>
+                  Mark complete, log progress each visit, or reschedule. Assessment baseline shows on the complementary visit.
+                </Text>
+                {formatProgressHistoryLine(b) ? (
+                  <Text style={styles.wfProgressLine}>Progress · {formatProgressHistoryLine(b)}</Text>
+                ) : null}
+                <View style={styles.wfRows}>
+                  {rows.map((r) => {
+                    const rowKey = String(r.sessionId || r.key)
+                    const isComplimentary = Boolean(r.complimentary)
+                    const rowDone = r.status === 'completed'
+                    const rowNoShow = r.status === 'no_show'
+                    const isToday = r.date === tday
+                    const isTodayOrPast = r.date <= tday
+                    const rowStatus = rowDone || rowNoShow ? r.status : b.rescheduled && r.date !== tday ? 'rescheduled' : 'scheduled'
+                    const actBusy = String(busySessionKey || '') === rowKey
+                    // Same rules as web BookingSessionTimeline; a missed (no-show) visit can still be rescheduled or marked complete.
+                    const showPhysioButtons = !rowDone && !isComplimentary
+                    const showReschedule = !rowDone && !isComplimentary
+                    const perRowReason = rowBlockedReason(r)
+                    const blockedReason = !isTodayOrPast
+                      ? 'You can mark this session once its scheduled day arrives'
+                      : perRowReason
+                    const canActOnRow = showPhysioButtons && !blockedReason
+                    const payEntry = sessionPaymentMap?.[r.sessionId ? String(r.sessionId) : '__primary__']
+                    const hasNotes = Boolean(r.notes?.text?.trim() || r.notes?.painNow != null)
+                    const rowTone = isComplimentary
+                      ? styles.wfRowTeal
+                      : rowDone
+                      ? styles.wfRowDone
+                      : rowNoShow
+                      ? styles.wfRowNoShow
+                      : isToday
+                      ? styles.wfRowToday
+                      : b.rescheduled
+                      ? styles.wfRowResched
+                      : null
+                    const pill = ROW_PILL[rowStatus] || ROW_PILL.scheduled
+
                     return (
-                      <View key={m.bySession} style={[styles.milestoneRow, m.met && styles.milestoneRowMet]}>
-                        <Ionicons
-                          name={m.met ? 'checkmark-circle' : 'ellipse-outline'}
-                          size={13}
-                          color={m.met ? colors.success : colors.amber800}
-                        />
-                        <Text style={[styles.milestoneTxt, m.met && styles.milestoneTxtMet]}>
-                          {`Session ${m.bySession}: ₹${reqAmt.toLocaleString('en-IN')} required — `}
-                          {m.met ? 'met' : `pending (Patient needs to pay ₹${remainingToPay.toLocaleString('en-IN')})`}
-                        </Text>
+                      <View key={r.key} style={[styles.wfRow, rowTone]}>
+                        <View style={styles.wfRowTop}>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={styles.wfRowTitle}>
+                              <Text style={{ fontFamily: font.semiBold }}>
+                                {isComplimentary ? r.label || 'Assessment' : `#${r.n}`}
+                              </Text>
+                              <Text style={{ color: colors.slate500 }}> · </Text>
+                              {formatBookingDateAndSlot(r.date, r.time)}
+                            </Text>
+                            <View style={styles.wfRowTitleLine}>
+                              {isComplimentary ? (
+                                <View style={styles.wfTagTeal}><Text style={styles.wfTagTealTxt}>COMPLIMENTARY</Text></View>
+                              ) : null}
+                              {showPhysioButtons && isToday ? <Text style={styles.wfTodayTxt}>Today</Text> : null}
+                              {showPhysioButtons && perRowReason ? (
+                                <View style={styles.wfTagLocked}>
+                                  <Ionicons name="lock-closed" size={9} color={colors.slate700} />
+                                  <Text style={styles.wfTagLockedTxt}>LOCKED</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                            {!isComplimentary ? (
+                              <Text style={styles.wfPayLine}>
+                                {payEntry?.recorded > 0.009 ? (
+                                  <Text style={{ fontFamily: font.semiBold, color: colors.teal800 }}>
+                                    ₹{Number(payEntry.recorded).toFixed(2)} recorded
+                                    {payEntry.items?.some((i) => i.explicit === false) ? (
+                                      <Text style={{ fontFamily: font.regular, color: colors.slate500 }}> (allocated)</Text>
+                                    ) : null}
+                                  </Text>
+                                ) : 'No payment recorded yet'}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <View style={[styles.wfPill, { backgroundColor: pill.bg, borderColor: pill.border }]}>
+                            <Text style={[styles.wfPillTxt, { color: pill.fg }]}>{pill.label}</Text>
+                          </View>
+                        </View>
+
+                        {showReschedule || showPhysioButtons || !isComplimentary ? (
+                          <View style={styles.wfRowBtns}>
+                            {showReschedule ? (
+                              <Pressable style={[styles.wfRowBtn, styles.wfRowBtnBlue]} onPress={() => openReschedule(r)}>
+                                <Text style={[styles.wfRowBtnTxt, { color: colors.blue700 }]}>Reschedule</Text>
+                              </Pressable>
+                            ) : null}
+                            {showPhysioButtons ? (
+                              <Pressable
+                                style={[styles.wfRowBtn, styles.wfRowBtnGreen, (!canActOnRow || actBusy) && styles.stepperBtnDisabled]}
+                                disabled={!canActOnRow || actBusy}
+                                onPress={() => onCompleteRow(r)}
+                              >
+                                <Text style={[styles.wfRowBtnTxt, { color: colors.emerald700 }]}>{actBusy ? 'Saving…' : 'Mark complete'}</Text>
+                              </Pressable>
+                            ) : null}
+                            {showPhysioButtons && !rowNoShow && r.perSession ? (
+                              <Pressable
+                                style={[styles.wfRowBtn, styles.wfRowBtnRose, (!canActOnRow || actBusy) && styles.stepperBtnDisabled]}
+                                disabled={!canActOnRow || actBusy}
+                                onPress={() => onNoShowRow(r)}
+                              >
+                                <Text style={[styles.wfRowBtnTxt, { color: colors.rose900 }]}>No-show</Text>
+                              </Pressable>
+                            ) : null}
+                            {!isComplimentary ? (
+                              <Pressable style={[styles.wfLogBtn, hasNotes && styles.wfLogBtnHas]} onPress={() => setNotesRow(r)}>
+                                <Text style={styles.wfLogBtnTxt}>{hasNotes ? 'Edit progress' : 'Log progress'}</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        ) : null}
+
+                        {showPhysioButtons && blockedReason ? <Text style={styles.wfRowHint}>{blockedReason}</Text> : null}
+                        {rowNoShow && r.noShowReason ? <Text style={styles.wfRowHint}>Reason: {r.noShowReason}</Text> : null}
+                        {isComplimentary && r.notes?.text ? <Text style={styles.wfRowHint}>{r.notes.text}</Text> : null}
                       </View>
                     )
                   })}
                 </View>
+              </View>
+
+              {!hasSchedulePlan && b.sessionStatus !== 'completed' ? (
+                <Pressable
+                  style={[styles.wfPrimaryBtn, (busy || !canMarkComplete) && styles.stepperBtnDisabled]}
+                  disabled={busy || !canMarkComplete}
+                  onPress={() => confirmComplete({ perSession: false })}
+                >
+                  <Text style={styles.wfPrimaryBtnTxt}>{busy ? 'Saving…' : 'Mark visit complete'}</Text>
+                </Pressable>
               ) : null}
-
-              {/* Vertical stepper layout */}
-              <View style={styles.stepperContainer}>
-                {noteRows.map((r, index) => {
-                  const sessionIdKey = String(r.sessionId || r.key)
-                  const isExpanded = expandedSessionId === sessionIdKey
-                  
-                  const rowDone = r.status === 'completed'
-                  const rowNoShow = r.status === 'no_show'
-                  const isToday = r.date === todayYmd()
-                  const isUpcoming = r.date > todayYmd()
-                  
-                  const showReschedule = Boolean(!rowDone && !rowNoShow)
-                  const busyKey = String(r.sessionId || r.key)
-                  const actBusy = String(busySessionKey || '') === busyKey
-                  
-                  // Check if a payment milestone blocks this specific session
-                  const sessionMilestoneBlocked = Boolean(
-                    milestoneStatus?.some((m) => m.bySession <= r.n && !m.met)
-                  )
-                  const milestoneNeeded = sessionMilestoneBlocked
-                    ? milestoneStatus.find((m) => m.bySession <= r.n && !m.met)
-                    : null
-                  const milestoneMsg = milestoneNeeded
-                    ? `₹${Math.ceil(
-                        (milestoneNeeded.requiredPct * (paymentSummary?.totalAmount ?? 0)) -
-                        ((paymentSummary?.totalPaid ?? 0) + (paymentSummary?.totalCollected ?? 0))
-                      )} payment required first`
-                    : ''
-
-                  const blockedReason = b.status === 'assigned'
-                    ? 'Accept the assignment first'
-                    : isUpcoming
-                    ? 'Available on the scheduled day'
-                    : !paymentSummary
-                    ? 'Payment must be secured before completion'
-                    : sessionMilestoneBlocked
-                    ? milestoneMsg
-                    : ''
-                    
-                  const canActOnRow = !rowDone && !rowNoShow && !blockedReason
-                  const showPhysioButtons = !rowDone && !rowNoShow
-
-                  return (
-                    <View key={r.key} style={styles.stepperRow}>
-                      {/* Left: Stepper Line & Node */}
-                      <View style={styles.stepperLeftCol}>
-                        <View style={[
-                          styles.stepperLine,
-                          index === 0 && styles.stepperLineFirst,
-                          index === noteRows.length - 1 && styles.stepperLineLast,
-                          rowDone && styles.stepperLineDone
-                        ]} />
-                        <Pressable 
-                          onPress={() => setExpandedSessionId(isExpanded ? null : sessionIdKey)}
-                          style={[
-                            styles.stepperNode,
-                            rowDone && styles.stepperNodeDone,
-                            rowNoShow && styles.stepperNodeNoShow,
-                            isToday && !rowDone && !rowNoShow && styles.stepperNodeToday
-                          ]}
-                        >
-                          {rowDone ? (
-                            <Ionicons name="checkmark" size={12} color={colors.white} />
-                          ) : rowNoShow ? (
-                            <Ionicons name="close" size={12} color={colors.white} />
-                          ) : isToday ? (
-                            <View style={styles.stepperNodeTodayInner} />
-                          ) : (
-                            <Ionicons name="lock-closed" size={10} color={colors.slate400} />
-                          )}
-                        </Pressable>
-                      </View>
-
-                      {/* Right: Stepper Card Content */}
-                      <Pressable 
-                        onPress={() => setExpandedSessionId(isExpanded ? null : sessionIdKey)}
-                        style={[
-                          styles.stepperCard,
-                          isExpanded && styles.stepperCardExpanded,
-                          rowDone && styles.stepperCardDone,
-                          rowNoShow && styles.stepperCardNoShow,
-                          isToday && !rowDone && !rowNoShow && styles.stepperCardToday
-                        ]}
-                      >
-                        <View style={styles.stepperCardHeader}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={[styles.stepperSessionNum, rowDone && styles.stepperSessionNumDone]}>
-                              Session #{r.n}
-                            </Text>
-                            <Text style={styles.stepperSessionDate}>
-                              {formatBookingDateAndSlot(r.date, r.time)}
-                            </Text>
-                          </View>
-
-                          <View style={styles.stepperCardHeaderRight}>
-                            {/* Status badge */}
-                            <View style={[
-                              styles.stepperStatusBadge,
-                              rowDone && styles.stepperStatusBadgeDone,
-                              rowNoShow && styles.stepperStatusBadgeNoShow,
-                              isToday && !rowDone && !rowNoShow && styles.stepperStatusBadgeToday
-                            ]}>
-                              <Text style={[
-                                styles.stepperStatusText,
-                                rowDone && styles.stepperStatusTextDone,
-                                rowNoShow && styles.stepperStatusTextNoShow,
-                                isToday && !rowDone && !rowNoShow && styles.stepperStatusTextToday
-                              ]}>
-                                {rowDone ? 'Done' : rowNoShow ? 'No-show' : isToday ? 'Today' : 'Scheduled'}
-                              </Text>
-                            </View>
-                            {rowDone ? (
-                              <View
-                                style={[
-                                  styles.stepperConfirmBadge,
-                                  r.patientConfirmed
-                                    ? styles.stepperConfirmBadgeDone
-                                    : styles.stepperConfirmBadgePending,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.stepperConfirmBadgeTxt,
-                                    r.patientConfirmed
-                                      ? styles.stepperConfirmBadgeTxtDone
-                                      : styles.stepperConfirmBadgeTxtPending,
-                                  ]}
-                                >
-                                  {r.patientConfirmed
-                                    ? 'Patient confirmed'
-                                    : 'Awaiting patient confirmation'}
-                                </Text>
-                              </View>
-                            ) : null}
-                            {/* Expand/collapse chevron */}
-                            <Ionicons
-                              name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                              size={14}
-                              color={colors.slate400}
-                            />
-                          </View>
-                        </View>
-
-                        {rowNoShow && r.noShowReason ? (
-                          <View style={styles.stepperNoShowBox}>
-                            <Text style={styles.stepperNoShowTitle}>No-Show Registered</Text>
-                            <Text style={styles.stepperNoShowReason}>Reason: {r.noShowReason}</Text>
-                          </View>
-                        ) : null}
-
-                        {/* Collapsible Action Drawer */}
-                        {isExpanded ? (
-                          <View style={styles.stepperDrawer}>
-                            {showPhysioButtons ? (
-                              <>
-                                {/* Lock / upcoming notice shown BEFORE action buttons */}
-                                {!canActOnRow && blockedReason ? (
-                                  <View style={[styles.lockBox, isUpcoming && styles.lockBoxUpcoming]}>
-                                    <Ionicons
-                                      name={isUpcoming ? 'time-outline' : 'lock-closed'}
-                                      size={11}
-                                      color={isUpcoming ? colors.slate600 : colors.slate500}
-                                    />
-                                    <Text style={[styles.lockText, isUpcoming && styles.lockTextUpcoming]}>
-                                      {blockedReason}
-                                    </Text>
-                                  </View>
-                                ) : null}
-
-                                <View style={[styles.stepperDrawerContent, !canActOnRow && blockedReason ? { marginTop: 8 } : null]}>
-                                  {!isUpcoming ? (
-                                    <View style={styles.stepperActionRow}>
-                                      {isOfflinePlan ? (
-                                        <Pressable
-                                          style={[
-                                            styles.stepperCollectBtn,
-                                            (!canActOnRow || actBusy || recordBusy) && styles.stepperBtnDisabled,
-                                          ]}
-                                          disabled={!canActOnRow || actBusy || recordBusy}
-                                          onPress={() => openRecordCollectionForSession(r)}
-                                        >
-                                          <Ionicons name="cash-outline" size={13} color={colors.brand} />
-                                          <Text style={styles.stepperCollectBtnTxt}>Record collection</Text>
-                                        </Pressable>
-                                      ) : null}
-                                      <Pressable
-                                        style={[
-                                          styles.stepperCompleteBtn,
-                                          isOfflinePlan ? styles.stepperCompleteBtnHalf : styles.stepperCompleteBtnFull,
-                                          (!canActOnRow || actBusy) && styles.stepperBtnDisabled,
-                                        ]}
-                                        disabled={!canActOnRow || actBusy}
-                                        onPress={() => requestCompleteSession(r)}
-                                      >
-                                        <Ionicons name="checkmark-circle-outline" size={13} color={colors.white} />
-                                        <Text style={styles.stepperCompleteBtnTxt}>
-                                          {actBusy ? 'Saving...' : 'Mark complete'}
-                                        </Text>
-                                      </Pressable>
-                                    </View>
-                                  ) : null}
-
-                                  {/* Reschedule & No-show are secondary, side-by-side */}
-                                  <View style={styles.stepperSecondaryRow}>
-                                    <Pressable
-                                      style={[styles.stepperSecondaryBtn, styles.stepperReschedBtn]}
-                                      onPress={() => openReschedule(r)}
-                                    >
-                                      <Ionicons name="calendar-outline" size={13} color={colors.brand} />
-                                      <Text style={[styles.stepperSecondaryBtnTxt, { color: colors.brand }]}>Reschedule</Text>
-                                    </Pressable>
-
-                                    {!isUpcoming && r.perSession ? (
-                                      <Pressable
-                                        style={[
-                                          styles.stepperSecondaryBtn,
-                                          styles.stepperNoShowBtn,
-                                          (!canActOnRow || actBusy) && styles.stepperBtnDisabled
-                                        ]}
-                                        disabled={!canActOnRow || actBusy}
-                                        onPress={() => {
-                                          setNoShowReason('')
-                                          setNoShowRow(r)
-                                        }}
-                                      >
-                                        <Ionicons name="close-circle-outline" size={13} color={colors.danger} />
-                                        <Text style={[styles.stepperSecondaryBtnTxt, { color: colors.danger }]}>No-Show</Text>
-                                      </Pressable>
-                                    ) : null}
-                                  </View>
-                                </View>
-                              </>
-                            ) : null}
-
-                            {/* Inline Note Editor */}
-                            <View style={styles.timelineNoteDivider} />
-                            <SessionNoteEditor row={r} onSaved={load} />
-                          </View>
-                        ) : (
-                          /* Snippet preview if notes exist and collapsed */
-                          r.notes?.text ? (
-                            <View style={styles.noteSnippetWrap}>
-                              <Ionicons name="document-text" size={11} color={colors.brand} />
-                              <Text style={styles.noteSnippetText} numberOfLines={1}>{r.notes.text}</Text>
-                            </View>
-                          ) : null
-                        )}
-                      </Pressable>
-                    </View>
-                  )
-                })}
-              </View>
+              {!hasSchedulePlan && b.sessionStatus !== 'completed' && !canMarkComplete && paymentBlockReason ? (
+                <Text style={styles.wfBoxHint}>{paymentBlockReason}</Text>
+              ) : null}
             </View>
-          </View>
-        ) : null}
+          ) : null}
 
-        {/* ── Plan & Billing Tab ────────────────────────── */}
-        {!isAssigned && activeTab === 'finance' ? (
-          <View style={styles.tabContentGap}>
-            {/* Payment progress card */}
-            <View style={styles.stripeProgressCard}>
-              {/* Dark header band */}
-              <View style={styles.stripeProgressHeaderBand}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.stripeProgressTitle}>
-                    {isOnlinePayment ? 'Payment Progress' : 'Collection Progress'}
-                  </Text>
-                  <Text style={styles.stripeProgressSub}>
-                    {isOnlinePayment ? 'Online installments' : 'Offline collections'}
-                  </Text>
-                </View>
-                <View style={styles.stripeProgressPctWrap}>
-                  <Text style={styles.stripeProgressPct}>{Math.round(paidPercent)}%</Text>
-                  {outstanding > 0.009 ? (
-                    <View style={[
-                      styles.stripeOutstandingBadge,
-                      isOnlinePayment && styles.stripeOutstandingBadgeOnline,
-                    ]}>
-                      <Text style={[
-                        styles.stripeOutstandingBadgeTxt,
-                        isOnlinePayment && styles.stripeOutstandingBadgeTxtOnline,
-                      ]}>
-                        ₹{outstanding.toFixed(0)} due
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.stripeOutstandingBadgeOnline}>
-                      <Text style={styles.stripeOutstandingBadgeTxtOnline}>Paid in full</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Full-width progress bar */}
-              <View style={styles.stripeSplitBar}>
-                <View style={[styles.stripeSplitBarPaid, { width: `${paidPercent}%` }]} />
-              </View>
-
-              {/* Metric chips row */}
-              <View style={styles.stripeMetricsRow}>
-                <View style={styles.stripeMetric}>
-                  <View style={[styles.stripeMetricDot, { backgroundColor: colors.success }]} />
-                  <Text style={styles.stripeMetricLabel}>{isOnlinePayment ? 'Paid' : 'Collected'}</Text>
-                  <Text style={styles.stripeMetricVal}>₹{effectivePaid.toFixed(0)}</Text>
-                </View>
-                <View style={styles.stripeMetricDivider} />
-                <View style={styles.stripeMetric}>
-                  <View style={[styles.stripeMetricDot, { backgroundColor: outstanding > 0.009 ? colors.warning : colors.success }]} />
-                  <Text style={styles.stripeMetricLabel}>Outstanding</Text>
-                  <Text style={[styles.stripeMetricVal, outstanding < 0.01 && { color: colors.success }]}>
-                    {outstanding < 0.01 ? '₹0' : `₹${outstanding.toFixed(0)}`}
-                  </Text>
-                </View>
-                <View style={styles.stripeMetricDivider} />
-                <View style={styles.stripeMetric}>
-                  <View style={[styles.stripeMetricDot, { backgroundColor: colors.brand }]} />
-                  <Text style={styles.stripeMetricLabel}>Total</Text>
-                  <Text style={styles.stripeMetricVal}>₹{totalAmount.toFixed(0)}</Text>
-                </View>
-              </View>
-            </View>
-
-            {b.serviceType === 'home' ? (
-              showCreatePlan ? (
-                <HomePlanFormPhysio booking={b} busy={busy} onSubmit={(payload) => createPlan(b._id, payload)} />
-              ) : showPlanPending ? (
-                <View style={styles.planPendingCard}>
-                  <View style={styles.planPendingBand}>
-                    <View style={styles.planPendingIconWrap}>
-                      <Ionicons name="hourglass-outline" size={26} color={colors.warning} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.planPendingTitle}>Awaiting approval</Text>
-                      <Text style={styles.planPendingBody}>
-                        Patient reviewing your {b.sessions}-session plan
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.planPendingKVs}>
-                    <PlanKV label="Sessions" value={String(b.sessions ?? '—')} />
-                    <PlanKV label="Fee/session" value={b.amountPerSession != null ? `₹${b.amountPerSession}` : '—'} />
-                    {b.discountPercent != null ? <PlanKV label="Discount" value={`${b.discountPercent}%`} /> : null}
-                    <PlanKV label="Total" value={paymentAmountLabel(b)} highlight />
-                  </View>
-                </View>
-              ) : b.planStatus === 'approved' ? (
-                <View style={styles.planApprovedCard}>
-                  <View style={styles.planApprovedHead}>
-                    <View style={styles.planApprovedIconWrap}>
-                      <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.planApprovedTitle}>Plan approved</Text>
-                      <Text style={styles.planApprovedSub}>Patient accepted the plan. Sessions are active.</Text>
-                    </View>
-                  </View>
-                  <View style={styles.planPendingKVs}>
-                    <PlanKV label="Sessions" value={String(b.sessions ?? '—')} />
-                    <PlanKV label="Fee/session" value={b.amountPerSession != null ? `₹${b.amountPerSession}` : '—'} />
-                    {b.discountPercent != null ? <PlanKV label="Discount" value={`${b.discountPercent}%`} /> : null}
-                    <PlanKV label="Mode" value={paymentModeLabel(b)} />
-                    <PlanKV label="Total" value={paymentAmountLabel(b)} highlight />
-                  </View>
-                </View>
+          {openStep === 'payment' ? (
+            <View style={styles.wfStack}>
+              {!planLive && !isOnline ? (
+                <Text style={styles.wfBoxText}>Payment details appear after the plan goes live.</Text>
               ) : (
-                <View style={styles.planNaCard}>
-                  <Ionicons name="clipboard-outline" size={28} color={colors.slate300} />
-                  <Text style={styles.planNaTxt}>No plan for this booking type.</Text>
-                </View>
-              )
-            ) : null}
+                <>
+                  <View style={styles.wfGrid}>
+                    <GridCell k="Mode" v={paymentModeLabel(b)} />
+                    <GridCell k="Amount" v={paymentAmountLabel(b)} strong />
+                    <GridCell k="Hold" v={paymentStatusLabel(b.paymentStatus)} />
+                    <GridCell k="Status" v={marketplacePaymentStatusLabel(b.payment?.status)} />
+                    {outstanding > 0.009 ? (
+                      <View style={[styles.wfGridCell, { width: '100%' }]}>
+                        <Text style={styles.wfGridK}>Outstanding</Text>
+                        <Text style={[styles.wfGridV, { fontSize: type.md, color: colors.rose900 }]}>₹{outstanding.toFixed(0)}</Text>
+                      </View>
+                    ) : null}
+                  </View>
 
-            {showInstallments ? (
-              <InstallmentsPhysioCard
-                title={isOfflinePlan ? 'Collections' : 'Installments'}
-                subtitle={
-                  isOfflinePlan
-                    ? 'Record each cash/UPI hand-off.'
-                    : 'Patient pays online per installment; each verified payment counts toward your payment milestones.'
-                }
-                summary={paymentSummary}
-                payments={paymentsList}
-                emptyMessage={isOfflinePlan ? 'No collections recorded yet.' : 'No online installments yet.'}
-              >
-                {isOfflinePlan && outstanding > 0.009 && b.planStatus === 'approved' ? (
-                  <Pressable
-                    style={styles.recordCollectionBtn}
-                    onPress={() => {
-                      const out = roundMoney2(Number(paymentSummary?.outstanding || 0))
-                      const per = roundMoney2(Number(paymentSummary?.amountPerSession || 0))
-                      const def = out <= 0 ? '' : per > 0 ? String(Math.min(per, out)) : String(out)
-                      setRecordAmount(def)
-                      setRecordNote('')
-                      setRecordErr('')
-                      setRecordCollectionOpen(true)
-                    }}
-                  >
-                    <Ionicons name="add-circle-outline" size={14} color={colors.white} />
-                    <Text style={styles.recordCollectionBtnTxt}>Record collection</Text>
-                  </Pressable>
-                ) : null}
-              </InstallmentsPhysioCard>
-            ) : null}
+                  {b.offlinePaymentRejectReason && b.payment?.status === 'pending' ? (
+                    <View style={styles.warnBox}>
+                      <Text style={styles.warnTitle}>Admin note</Text>
+                      <Text style={styles.warnBody}>{b.offlinePaymentRejectReason}</Text>
+                    </View>
+                  ) : null}
 
-            <View style={styles.sectionCard}>
-              <SectionTitle title="Payment Details" hint="Financial parameters & transaction states." icon="card-outline" />
-              <KV k="Sessions Count" v={b.sessions != null ? String(b.sessions) : '—'} />
-              <KV k="Price per session" v={b.amountPerSession != null ? `₹${b.amountPerSession}` : '—'} />
-              {b.discountPercent != null && b.discountPercent > 0 ? (
-                <KV k="Discount" v={`${b.discountPercent}%`} />
-              ) : null}
-              {Number(b.distanceSurchargeAmount || 0) > 0 ? (
-                <KV k="Distance surcharge" v={`₹${Number(b.distanceSurchargeAmount).toFixed(2)}`} />
-              ) : null}
-              <KV k="Total Plan Value" v={paymentAmountLabel(b)} bold highlight />
-              <KV k="Payment Mode" v={paymentModeLabel(b)} cap bold highlight />
-              <KV
-                k="Outstanding Balance"
-                v={`₹${outstanding.toFixed(2)}`}
-                bold
-                highlight
-                highlightColor={outstanding > 0 ? colors.warningBg : colors.successBg}
-                last
-              />
-              {b.offlinePaymentRejectReason && b.payment?.status === 'pending' ? (
-                <View style={styles.warnBox}>
-                  <Text style={styles.warnTitle}>Admin note</Text>
-                  <Text style={styles.warnBody}>{b.offlinePaymentRejectReason}</Text>
+                  {showInstallments ? (
+                    <InstallmentsPhysioCard
+                      title={isOfflinePlan ? 'Collections' : 'Installments'}
+                      subtitle={isOfflinePlan ? 'Record each cash/UPI hand-off from the patient.' : 'Patient pays online per installment.'}
+                      summary={paymentSummary}
+                      payments={payments}
+                      emptyMessage={isOfflinePlan ? 'No collections recorded yet.' : 'No online installments yet.'}
+                    >
+                      {isOfflinePlan && outstanding > 0.009 && planLive && !b.managerId ? (
+                        <Pressable style={styles.recordCollectionBtn} onPress={() => openRecordCollection(null)}>
+                          <Ionicons name="add-circle-outline" size={14} color={colors.white} />
+                          <Text style={styles.recordCollectionBtnTxt}>Record collection</Text>
+                        </Pressable>
+                      ) : null}
+                    </InstallmentsPhysioCard>
+                  ) : null}
+                </>
+              )}
+            </View>
+          ) : null}
+        </View>
+
+        {/* ── Mark complete confirmation ───────────────── */}
+        <Modal transparent visible={confirmCompleteRow != null} animationType="fade" onRequestClose={() => setConfirmCompleteRow(null)}>
+          <View style={styles.modalRoot}>
+            <Pressable style={styles.modalBackdrop} onPress={() => setConfirmCompleteRow(null)} />
+            <View style={styles.modalCard}>
+              <View style={styles.modalIconRow}>
+                <View style={[styles.modalIconWrap, { backgroundColor: colors.successBg }]}>
+                  <Ionicons name="checkmark-done-outline" size={18} color={colors.success} />
                 </View>
-              ) : null}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle}>Mark session as complete?</Text>
+                  <Text style={styles.modalSub}>
+                    {confirmCompleteRow?.perSession
+                      ? `Session #${confirmCompleteRow.n} · ${formatBookingDateAndSlot(confirmCompleteRow.date, confirmCompleteRow.time)}`
+                      : formatBookingDateAndSlot(b.date, b.timeSlot)}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.confirmNote}>
+                <Ionicons name="information-circle-outline" size={15} color={colors.teal800} />
+                <Text style={styles.confirmNoteTxt}>Only mark it complete after the visit has taken place.</Text>
+              </View>
+              <View style={styles.modalActions}>
+                <Pressable style={styles.modalCancelBtn} onPress={() => setConfirmCompleteRow(null)}>
+                  <Text style={styles.modalCancelTxt}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.modalPrimaryBtn, styles.confirmPrimaryBtn]} onPress={submitConfirmedComplete}>
+                  <Ionicons name="checkmark-circle-outline" size={16} color={colors.white} />
+                  <Text style={styles.modalPrimaryTxt}>Yes, mark complete</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
-        ) : null}
+        </Modal>
+
+        <SessionProgressModal open={notesRow != null} row={notesRow} booking={b} onClose={() => setNotesRow(null)} onSaved={load} />
 
         {/* ── No-show modal ──────────────────────────── */}
         <Modal transparent visible={Boolean(noShowRow)} animationType="fade">
-          <View style={styles.modalRoot}>
+          <KeyboardAvoidingView behavior="padding" style={styles.modalRoot}>
             <Pressable style={styles.modalBackdrop} onPress={() => { setNoShowRow(null); setNoShowReason('') }} />
             <View style={styles.modalCard}>
               <View style={styles.modalIconRow}>
@@ -1283,7 +1049,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                   <Ionicons name="person-remove-outline" size={18} color={colors.warning} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.modalTitle}>Mark no-show</Text>
+                  <Text style={styles.modalTitle}>Mark session as no-show</Text>
                   <Text style={styles.modalSub}>
                     Session #{noShowRow?.n} · {noShowRow ? formatBookingDateAndSlot(noShowRow.date, noShowRow.time) : ''}
                   </Text>
@@ -1298,7 +1064,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 onChangeText={setNoShowReason}
                 multiline
                 maxLength={500}
-                placeholder="Briefly describe the situation…"
+                placeholder="e.g. Patient was not at home; could not reach by phone."
                 placeholderTextColor={colors.slate400}
               />
               <View style={styles.modalActions}>
@@ -1321,12 +1087,12 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 </Pressable>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* ── Record collection modal ────────────────── */}
         <Modal transparent visible={recordCollectionOpen} animationType="slide">
-          <View style={styles.modalRoot}>
+          <KeyboardAvoidingView behavior="padding" style={styles.modalRoot}>
             <Pressable style={styles.modalBackdrop} onPress={() => { setRecordCollectionOpen(false); setRecordErr('') }} />
             <View style={styles.modalCard}>
               <View style={styles.modalIconRow}>
@@ -1392,7 +1158,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
                 </Pressable>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* ── Reschedule modal ───────────────────────── */}
@@ -1530,31 +1296,119 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
   )
 }
 
-const KV = memo(function KV({ k, v, cap, bold, last, highlight, highlightColor }) {
-  return (
-    <View style={[styles.kvRow, last && styles.kvRowLast, highlight && styles.kvRowHighlight]}>
-      <Text style={styles.kvK}>{k}</Text>
-      {highlight ? (
-        <View style={[styles.kvPill, { backgroundColor: highlightColor || colors.brandSoft }]}>
-          <Text style={[styles.kvPillTxt, { color: bold ? (highlightColor === colors.dangerBg ? colors.danger : colors.brand) : colors.textPrimary }]}>{v}</Text>
-        </View>
-      ) : (
-        <Text style={[styles.kvV, bold && styles.kvBold, cap && styles.kvCap]}>{v}</Text>
-      )}
-    </View>
-  )
-})
-
-const PlanKV = memo(function PlanKV({ label, value, highlight }) {
-  return (
-    <View style={styles.planKVRow}>
-      <Text style={styles.planKVLabel}>{label}</Text>
-      <Text style={[styles.planKVValue, highlight && styles.planKVValueHL]}>{value}</Text>
-    </View>
-  )
-})
-
 const styles = StyleSheet.create({
+  // ── Web-parity workflow layout (header / checklist / step panel) ──
+  wfCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    padding: 14,
+    marginBottom: 12,
+    ...Platform.select({
+      web: { boxShadow: '0px 1px 3px rgba(15, 23, 42, 0.06)' },
+      default: { shadowColor: '#0f172a', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+    }),
+  },
+  wfBackLink: { fontFamily: font.medium, fontSize: type.base, color: colors.teal800 },
+  wfHeadRow: { marginTop: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  wfName: { fontFamily: font.semiBold, fontSize: type.xl, lineHeight: leading.xl, color: colors.slate900 },
+  wfCode: { marginTop: 2, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: type.xs, fontWeight: '600', color: colors.slate500 },
+  wfIssue: { marginTop: 2, fontFamily: font.regular, fontSize: type.base, color: colors.slate600 },
+  wfMeta: { marginTop: 6, fontFamily: font.regular, fontSize: type.base, color: colors.slate500 },
+  wfBadge: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, flexShrink: 0 },
+  wfBadgeTxt: { fontFamily: font.semiBold, fontSize: type.xs },
+  wfKicker: { marginBottom: 8, fontFamily: font.semiBold, fontSize: type.xs, letterSpacing: 0.6, color: colors.slate500 },
+  railRow: { flexDirection: 'row', gap: 4 },
+  railItem: { flex: 1, minWidth: 0, alignItems: 'center', gap: 6, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 2 },
+  railItemOpen: { backgroundColor: colors.teal50, borderWidth: 1, borderColor: colors.brandSoft },
+  railCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  railCircleDone: { backgroundColor: '#059669' },
+  railCircleWaiting: { backgroundColor: '#dbeafe', borderWidth: 2, borderColor: '#60a5fa' },
+  railCircleCurrent: { backgroundColor: colors.brand, borderWidth: 2, borderColor: '#5eead4' },
+  railCircleUpcoming: { backgroundColor: colors.slate100 },
+  railCircleTxt: { fontFamily: font.bold, fontSize: type.xs },
+  railLabel: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.slate700 },
+  railHint: { fontFamily: font.regular, fontSize: type.xs, color: colors.slate500, maxWidth: '100%' },
+  wfPanelHead: { marginBottom: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
+  wfStepKicker: { fontFamily: font.semiBold, fontSize: type.xs, letterSpacing: 0.6, color: colors.teal800 },
+  wfPanelTitle: { marginTop: 2, fontFamily: font.semiBold, fontSize: type.lg, lineHeight: leading.lg, color: colors.slate900 },
+  wfWaitingTxt: { marginTop: 4, fontFamily: font.regular, fontSize: type.base, color: colors.blue700 },
+  wfStack: { gap: 14 },
+  wfBox: { borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.white, padding: 14 },
+  wfBoxMuted: { borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.slate50, padding: 14 },
+  wfBoxLabel: { fontFamily: font.semiBold, fontSize: type.xs, letterSpacing: 0.6, color: colors.slate500 },
+  wfBoxTitle: { marginTop: 4, fontFamily: font.semiBold, fontSize: type.md, color: colors.slate900 },
+  wfBoxTitleSm: { fontFamily: font.semiBold, fontSize: type.base, color: colors.slate900 },
+  wfBoxText: { marginTop: 2, fontFamily: font.regular, fontSize: type.base, lineHeight: leading.base, color: colors.slate600 },
+  wfBoxHint: { marginTop: 2, fontFamily: font.regular, fontSize: type.xs, lineHeight: leading.xs, color: colors.slate500 },
+  wfBtnRow: { marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  wfOutlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    backgroundColor: colors.teal50,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  wfOutlineBtnTxt: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.teal800 },
+  wfChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  wfChip: { borderRadius: 999, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.slate50, paddingHorizontal: 10, paddingVertical: 3 },
+  wfChipTxt: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.slate700 },
+  wfNote: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontFamily: font.regular, fontSize: type.base, lineHeight: leading.base, overflow: 'hidden' },
+  wfNoteBlue: { backgroundColor: colors.blue50, color: colors.blue700 },
+  wfNoteAmber: { backgroundColor: colors.amber50, color: colors.amber950 },
+  wfGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.slate50, padding: 14 },
+  wfGridCell: { width: '50%', paddingRight: 8 },
+  wfGridK: { fontFamily: font.regular, fontSize: type.base, color: colors.slate500 },
+  wfGridV: { marginTop: 2, fontFamily: font.medium, fontSize: type.base, color: colors.slate900 },
+  wfPrimaryBtn: { alignSelf: 'flex-start', borderRadius: 12, backgroundColor: colors.brand, paddingHorizontal: 18, paddingVertical: 11 },
+  wfPrimaryBtnTxt: { fontFamily: font.semiBold, fontSize: type.md, color: colors.white },
+  wfRowTitleLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  wfTagTeal: { borderRadius: 6, borderWidth: 1, borderColor: colors.brandSoft, backgroundColor: colors.teal50, paddingHorizontal: 5, paddingVertical: 1 },
+  wfTagTealTxt: { fontFamily: font.semiBold, fontSize: 9, letterSpacing: 0.4, color: colors.teal800 },
+  wfTagLocked: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 6, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.slate100, paddingHorizontal: 5, paddingVertical: 1 },
+  wfTagLockedTxt: { fontFamily: font.semiBold, fontSize: 9, letterSpacing: 0.4, color: colors.slate700 },
+  wfProgressLine: {
+    marginTop: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    backgroundColor: colors.teal50,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontFamily: font.medium,
+    fontSize: type.xs,
+    color: colors.teal800,
+    overflow: 'hidden',
+  },
+  wfLogBtn: { borderRadius: 8, borderWidth: 1, borderColor: '#c7d2fe', backgroundColor: '#eef2ff', paddingHorizontal: 10, paddingVertical: 4 },
+  wfLogBtnHas: { borderColor: '#a5b4fc', backgroundColor: '#e0e7ff' },
+  wfLogBtnTxt: { fontFamily: font.semiBold, fontSize: type.xs, color: '#3730a3' },
+  wfRows: { marginTop: 12, gap: 8 },
+  wfRow: { borderRadius: 10, borderWidth: 1, borderColor: colors.slate100, backgroundColor: colors.white, paddingHorizontal: 12, paddingVertical: 10 },
+  wfRowTeal: { borderColor: '#99f6e4', backgroundColor: 'rgba(240, 253, 250, 0.7)' },
+  wfRowDone: { borderColor: '#a7f3d0', backgroundColor: 'rgba(236, 253, 245, 0.9)' },
+  wfRowNoShow: { borderColor: '#fecdd3', backgroundColor: 'rgba(255, 241, 242, 0.8)' },
+  wfRowToday: { borderColor: '#93c5fd', backgroundColor: colors.blue50 },
+  wfRowResched: { borderColor: colors.amber200, backgroundColor: 'rgba(255, 251, 235, 0.5)' },
+  wfRowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  wfRowTitle: { fontFamily: font.regular, fontSize: type.base, lineHeight: leading.base, color: colors.slate800 },
+  wfTodayTxt: { fontFamily: font.semiBold, fontSize: type.xs, color: colors.blue700 },
+  wfPill: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, flexShrink: 0 },
+  wfPillTxt: { fontFamily: font.semiBold, fontSize: type.sm },
+  wfRowBtns: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  wfRowBtn: { borderRadius: 8, borderWidth: 1, backgroundColor: colors.white, paddingHorizontal: 10, paddingVertical: 5 },
+  wfRowBtnBlue: { borderColor: '#bfdbfe' },
+  wfRowBtnGreen: { borderColor: '#a7f3d0' },
+  wfRowBtnRose: { borderColor: '#fecdd3' },
+  wfRowBtnTxt: { fontFamily: font.semiBold, fontSize: type.sm },
+  wfRowHint: { marginTop: 6, fontFamily: font.regular, fontSize: type.xs, lineHeight: leading.xs, color: colors.slate500 },
+  wfPayLine: { marginTop: 3, fontFamily: font.regular, fontSize: type.xs, color: colors.slate500 },
+
   screenRoot: {
     flex: 1,
     backgroundColor: colors.canvas,
@@ -2242,6 +2096,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBtnBusy: { opacity: 0.6 },
+  confirmNote: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    backgroundColor: colors.teal50,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  confirmNoteTxt: { flex: 1, fontFamily: font.medium, fontSize: type.sm, lineHeight: 17, color: colors.teal800 },
+  confirmPrimaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.brand },
   modalPrimaryTxt: { fontFamily: font.bold, fontSize: type.sm, color: colors.white },
   modalDangerTxt: { fontFamily: font.bold, fontSize: type.sm, color: colors.white },
 

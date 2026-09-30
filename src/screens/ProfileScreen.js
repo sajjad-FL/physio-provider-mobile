@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native'
 import Toast from 'react-native-toast-message'
+import { useKeyboardAwareScroll } from '../hooks/useKeyboardAwareScroll'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { api } from '../api/client'
 import { getTokenSync } from '../auth/tokenStore'
@@ -141,7 +142,7 @@ function PremiumDateInput({ label, value, onPress, error }) {
 
 export default function ProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets()
-  const scrollRef = useRef(null)
+  const { scrollRef, keyboardAvoidingViewProps } = useKeyboardAwareScroll()
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150)
@@ -504,8 +505,8 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.flex, keyboardAvoidingViewProps.style]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* Ambient Top Background Halo Glow */}
       <View style={styles.ambientHeaderGlow} pointerEvents="none" />
@@ -924,7 +925,7 @@ export default function ProfileScreen({ navigation }) {
 
       {/* ── Location Modal ────────────────────────── */}
       <Modal transparent visible={locationModalOpen} animationType="fade" onRequestClose={() => setLocationModalOpen(false)}>
-        <View style={styles.modalRoot}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalRoot}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setLocationModalOpen(false)} />
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -976,7 +977,7 @@ export default function ProfileScreen({ navigation }) {
               <Text style={styles.modalCancelBtnTxt}>Cancel</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <MapPickerModal

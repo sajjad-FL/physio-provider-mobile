@@ -24,7 +24,7 @@ function KeyboardAwareScrollView({
   })
 
   return (
-    <KeyboardAvoidingView {...keyboardAvoidingViewProps} style={[{ flex: 1 }, style]}>
+    <KeyboardAvoidingView {...keyboardAvoidingViewProps} style={[keyboardAvoidingViewProps.style, style]}>
       <ScrollView
         {...scrollViewProps}
         {...rest}

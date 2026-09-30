@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import Toast from 'react-native-toast-message'
 import { api } from '../api/client'
 import PaginationBar from '../components/ui/PaginationBar'
+import RequiredMark from '../components/ui/RequiredMark'
+import { useKeyboardAwareScroll } from '../hooks/useKeyboardAwareScroll'
 import { colors } from '../theme/colors'
 import { font, type, leading } from '../theme/typography'
 import { formatInr } from '../utils/currency'
@@ -153,6 +155,12 @@ export default function PhysioWalletScreen() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false)
   const [withdrawInputFocused, setWithdrawInputFocused] = useState(false)
+  const [upiId, setUpiId] = useState('')
+  const [upiName, setUpiName] = useState('')
+  const [savingUpi, setSavingUpi] = useState(false)
+  const [upiFocus, setUpiFocus] = useState('')
+  // UPI inputs live in the list header — keep them above the keyboard (shared Android edge-to-edge fix).
+  const kb = useKeyboardAwareScroll()
 
   const loadPendingWithdraw = useCallback(async () => {
     try {
@@ -165,6 +173,8 @@ export default function PhysioWalletScreen() {
     try {
       const res = await api.get('/physio/wallet')
       setDash(res.data)
+      setUpiId(res.data?.payoutUpiId || '')
+      setUpiName(res.data?.payoutDisplayName || '')
     } catch { Toast.show({ type: 'error', text1: 'Failed to load wallet' }) }
     finally { setLoading(false) }
   }, [])
@@ -197,8 +207,29 @@ export default function PhysioWalletScreen() {
   }, [dash])
 
   const hasPending = Boolean(pendingWithdraw)
+  const hasUpi = Boolean(String(dash?.payoutUpiId || '').trim())
+  const withdrawDisabled = loading || hasPending || !Number.isFinite(available) || available <= 0 || !hasUpi
+
+  // Same as web PhysioWalletPage: admin pays approved withdrawals to this UPI ID.
+  async function saveUpi() {
+    if (!upiId.trim()) { Toast.show({ type: 'error', text1: 'Enter your UPI ID' }); return }
+    setSavingUpi(true)
+    try {
+      const { data } = await api.patch('/profile/payout', {
+        payoutUpiId: upiId.trim(),
+        payoutDisplayName: upiName.trim(),
+      })
+      Toast.show({ type: 'success', text1: data?.message || 'UPI saved' })
+      setUpiId(data?.payoutUpiId || '')
+      setUpiName(data?.payoutDisplayName || '')
+      setDash((prev) => (prev ? { ...prev, payoutUpiId: data?.payoutUpiId || '', payoutDisplayName: data?.payoutDisplayName || '' } : prev))
+    } catch (err) {
+      Toast.show({ type: 'error', text1: err.response?.data?.message || 'Could not save UPI' })
+    } finally { setSavingUpi(false) }
+  }
 
   async function submitWithdraw() {
+    if (!hasUpi) { Toast.show({ type: 'error', text1: 'Save your UPI ID before requesting a withdrawal' }); return }
     const n = Number(withdrawAmount.trim())
     if (!Number.isFinite(n) || n <= 0) { Toast.show({ type: 'error', text1: 'Enter a valid amount' }); return }
     if (n > available + 1e-6) { Toast.show({ type: 'error', text1: 'Exceeds available balance' }); return }
@@ -251,15 +282,16 @@ export default function PhysioWalletScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.withdrawBtn,
-                (loading || hasPending || !Number.isFinite(available) || available <= 0) && styles.withdrawBtnDisabled,
+                withdrawDisabled && styles.withdrawBtnDisabled,
                 pressed && styles.withdrawBtnPressed,
               ]}
               onPress={() => { setWithdrawAmount(''); setWithdrawOpen(true) }}
-              disabled={loading || hasPending || !Number.isFinite(available) || available <= 0}
+              disabled={withdrawDisabled}
             >
               <Ionicons name="arrow-up-circle-outline" size={16} color={colors.brand} />
               <Text style={styles.withdrawBtnTxt}>Withdraw money</Text>
             </Pressable>
+            {!hasUpi ? <Text style={styles.upiHint}>Save your UPI ID below before withdrawing.</Text> : null}
           </View>
 
           {/* ── Stat tiles ── */}
@@ -273,6 +305,48 @@ export default function PhysioWalletScreen() {
               <Text style={styles.statTileLabel}>TOTAL EARNED</Text>
               <Text style={styles.statTileValue}>{formatInr(w?.totalEarned)}</Text>
               <Text style={styles.statTileSub}>Lifetime earnings share</Text>
+            </View>
+          </View>
+
+          {/* ── Payout UPI ── */}
+          <View style={styles.section}>
+            <View style={styles.upiCard}>
+              <Text style={styles.sectionTitle}>Payout UPI</Text>
+              <Text style={[styles.sectionSub, { marginTop: 2 }]}>
+                Admin will transfer withdrawals to this UPI ID when they approve your request.
+              </Text>
+              <Text style={[styles.modalLabel, { marginTop: 12 }]}>UPI ID<RequiredMark /></Text>
+              <TextInput
+                style={[styles.modalInput, upiFocus === 'id' && styles.modalInputFocused]}
+                value={upiId}
+                onChangeText={setUpiId}
+                placeholder="yourname@oksbi"
+                placeholderTextColor={colors.slate300}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                onFocus={() => setUpiFocus('id')}
+                onBlur={() => setUpiFocus('')}
+              />
+              <Text style={[styles.modalLabel, { marginTop: 12 }]}>Name on UPI (optional)</Text>
+              <TextInput
+                style={[styles.modalInput, upiFocus === 'name' && styles.modalInputFocused]}
+                value={upiName}
+                onChangeText={setUpiName}
+                placeholder="Account holder name"
+                placeholderTextColor={colors.slate300}
+                onFocus={() => setUpiFocus('name')}
+                onBlur={() => setUpiFocus('')}
+              />
+              <Pressable
+                style={[styles.modalSubmit, styles.upiSaveBtn, savingUpi && styles.modalSubmitBusy]}
+                onPress={saveUpi}
+                disabled={savingUpi}
+              >
+                {savingUpi
+                  ? <ActivityIndicator size="small" color={colors.white} />
+                  : <Text style={styles.modalSubmitTxt}>Save UPI</Text>}
+              </Pressable>
             </View>
           </View>
 
@@ -304,10 +378,13 @@ export default function PhysioWalletScreen() {
   )
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: kb.keyboardAvoidingViewProps.style.paddingBottom }]}>
       <View style={styles.ambientHeaderGlow} />
       <View style={styles.ambientHeaderGlow2} />
       <FlatList
+        ref={kb.scrollRef}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         data={txLoading ? [] : tx}
         keyExtractor={(row, i) => String(row?._id || row?.syntheticKind || i)}
         renderItem={({ item }) => <TransactionRow row={item} />}
@@ -336,7 +413,7 @@ export default function PhysioWalletScreen() {
 
       {/* ── Withdrawal modal ── */}
       <Modal transparent visible={withdrawOpen} animationType="fade">
-        <View style={styles.modalBg}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalBg}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Request withdrawal</Text>
@@ -347,6 +424,12 @@ export default function PhysioWalletScreen() {
             <Text style={styles.modalSub}>
               Max: {formatInr(w?.availableBalance)} · Minimum ₹1 · One request at a time
             </Text>
+            {dash?.payoutUpiId ? (
+              <Text style={styles.payingTo}>
+                Paying to <Text style={{ fontFamily: font.semiBold }}>{dash.payoutUpiId}</Text>
+                {dash.payoutDisplayName ? ` (${dash.payoutDisplayName})` : ''}
+              </Text>
+            ) : null}
             <Text style={styles.modalLabel}>Amount (INR)</Text>
             <TextInput
               style={[
@@ -376,7 +459,7 @@ export default function PhysioWalletScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   )
@@ -559,6 +642,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand,
   },
   modalSubmitBusy: { opacity: 0.7 },
+  upiCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    padding: 16,
+  },
+  upiSaveBtn: { marginTop: 14, alignSelf: 'flex-start', minWidth: 110, alignItems: 'center' },
+  upiHint: { marginTop: 8, fontFamily: font.medium, fontSize: type.xs, color: colors.amber100 },
+  payingTo: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: colors.slate50,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontFamily: font.regular,
+    fontSize: type.xs,
+    color: colors.slate700 || colors.textPrimary,
+  },
   modalSubmitTxt: { fontFamily: font.semiBold, fontSize: type.base, color: colors.white },
 
   // New backgrounds/glows

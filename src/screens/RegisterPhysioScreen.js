@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Toast from 'react-native-toast-message'
 import { api, postFormData } from '../api/client'
 import AppHeader from '../components/AppHeader'
+import { useKeyboardAwareScroll } from '../hooks/useKeyboardAwareScroll'
 import MapPickerModal from '../components/booking/MapPickerModal'
 import EarningsEstimatorWidget from '../components/EarningsEstimatorWidget'
 import GovtIdDocumentSection from '../components/physio/GovtIdDocumentSection'
@@ -63,6 +64,15 @@ const STEPS = [
   { n: 4, title: 'Documents' },
   { n: 5, title: 'Review' },
 ]
+
+/** Per-step hero copy — mirrors web RegisterPhysioPage STEP_HERO. */
+const STEP_HERO = {
+  1: { title: 'Create your account', sub: 'Your sign-in, contact and basic profile.' },
+  2: { title: 'Your qualification', sub: 'Education and registration details.' },
+  3: { title: 'Your practice', sub: 'Services you offer and your fees.' },
+  4: { title: 'Upload documents', sub: 'Attach your certificates and ID proof.' },
+  5: { title: 'Review & submit', sub: 'Check everything before you submit.' },
+}
 
 const GENDER_OPTIONS = [
   { value: '', label: '—' },
@@ -189,6 +199,7 @@ function DocRow({ title, subtitle, asset, error, onPick, isOptional = false }) {
 
 export default function RegisterPhysioScreen({ navigation }) {
   const insets = useSafeAreaInsets()
+  const androidKeyboard = useKeyboardAwareScroll()
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
 
@@ -758,15 +769,15 @@ export default function RegisterPhysioScreen({ navigation }) {
 
   /** Space for footer row + safe area + keyboard so fields can scroll above the keyboard (esp. Android). */
   const footerReserve = step < 5 ? 88 + insets.bottom : 0
-  const keyboardPad =
-    Platform.OS === 'android' ? keyboardInset : Math.min(100, Math.round(keyboardInset * 0.4))
+  // Android: the shared hook shrinks the container above the keyboard instead (edge-to-edge).
+  const keyboardPad = Platform.OS === 'android' ? 0 : Math.min(100, Math.round(keyboardInset * 0.4))
   const scrollBottomPad = 24 + footerReserve + keyboardPad
 
   const kavOffset = Math.max(insets.top, 8) + 52
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
+      style={[styles.flex, androidKeyboard.keyboardAvoidingViewProps.style]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={kavOffset}
       enabled={Platform.OS === 'ios'}
@@ -792,6 +803,7 @@ export default function RegisterPhysioScreen({ navigation }) {
         <View style={styles.ambientHeaderGlow} pointerEvents="none" />
         <View style={styles.ambientHeaderGlow2} pointerEvents="none" />
         <ScrollView
+          ref={androidKeyboard.scrollRef}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           nestedScrollEnabled
@@ -800,11 +812,10 @@ export default function RegisterPhysioScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
         style={styles.scrollFlex}
       >
-        <Text style={styles.h1}>Register as a physiotherapist</Text>
-        <Text style={styles.lead}>
-          Same steps as on the web. After submit, an admin reviews your application before you can work on the
-          platform.
-        </Text>
+        {/* Per-step hero — same kicker/title/subtitle as web RegisterPhysioPage STEP_HERO. */}
+        <Text style={styles.heroKicker}>PHYSIOTHERAPIST REGISTRATION</Text>
+        <Text style={styles.h1}>{STEP_HERO[step].title}</Text>
+        <Text style={styles.lead}>{STEP_HERO[step].sub}</Text>
         <View style={{ height: 16 }} />
         <View style={styles.premiumProgressContainer}>
           <View style={styles.progressTextRow}>
@@ -1405,8 +1416,9 @@ const styles = StyleSheet.create({
   scrollPad: { paddingHorizontal: 16, paddingTop: 10 },
   headerSignIn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerLink: { fontFamily: font.semiBold, fontSize: type.sm, color: colors.brand },
-  h1: { fontFamily: font.bold, fontSize: type['2xl'], color: colors.ink, letterSpacing: -0.3 },
-  lead: { marginTop: 6, fontFamily: font.regular, fontSize: type.sm, color: colors.inkMuted, lineHeight: leading.sm },
+  heroKicker: { textAlign: 'center', fontFamily: font.semiBold, fontSize: type.xs, color: colors.brand, letterSpacing: 1 },
+  h1: { marginTop: 6, textAlign: 'center', fontFamily: font.bold, fontSize: type['2xl'], lineHeight: leading['2xl'], color: colors.ink, letterSpacing: -0.3 },
+  lead: { marginTop: 6, textAlign: 'center', fontFamily: font.regular, fontSize: type.base, color: colors.inkMuted, lineHeight: leading.base },
   stepRow: { flexDirection: 'row', gap: 10, paddingVertical: 6, paddingRight: 8, alignItems: 'center' },
   stepChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: r.full, borderWidth: 1, minHeight: 38, flexShrink: 0, justifyContent: 'center' },
   stepChipOff: { backgroundColor: 'rgba(255, 255, 255, 0.45)', borderColor: 'rgba(13, 148, 136, 0.15)' },

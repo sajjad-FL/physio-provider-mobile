@@ -1,21 +1,23 @@
 import { createContext, useContext, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { usePhysioMe, usePhysioBookings, usePhysioDisputes } from '../api/queries'
+import { physioNeedsAction } from '../utils/physioWorkflow'
 
 const BADGE_PARAMS = { page: 1, limit: 100 }
 
-function bookingNeedsPhysioAction(b) {
-  if (!b) return false
-  if (b.status === 'assigned') return true
-  if (b.serviceType !== 'home') return false
-  if (b.status !== 'accepted' && b.status !== 'scheduled') return false
-  if (b.planStatus === 'proposed' || b.planStatus === 'approved') return false
-  return true
-}
+// Same rule as the web nav badge (utils/physioWorkflow physioNeedsAction).
+const bookingNeedsPhysioAction = physioNeedsAction
 
 function activeDisputeCount(disputes) {
   if (!Array.isArray(disputes)) return 0
   return disputes.filter((d) => d.status === 'open' || d.status === 'under_review').length
+}
+
+/** Mirrors web PhysioLayout navLockedWhilePending: only Profile, Onboarding, Verification (and Hub/Bookings landing) stay open. */
+const LOCKED_WHILE_PENDING = new Set(['PhysioWalletTab', 'PhysioAvailabilityTab', 'PhysioNotesTab', 'PhysioDisputes'])
+
+export function isRouteLockedWhilePending(route) {
+  return LOCKED_WHILE_PENDING.has(route)
 }
 
 const PhysioWorkspaceContext = createContext(null)

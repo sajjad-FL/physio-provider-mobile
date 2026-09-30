@@ -5,7 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { Ionicons } from '@expo/vector-icons'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { PhysioWorkspaceProvider, usePhysioWorkspace } from '../context/PhysioWorkspaceContext'
+import Toast from 'react-native-toast-message'
+import { PhysioWorkspaceProvider, isRouteLockedWhilePending, usePhysioWorkspace } from '../context/PhysioWorkspaceContext'
 import PhysioBookingsScreen from '../screens/PhysioBookingsScreen'
 import PhysioBookingDetailScreen from '../screens/PhysioBookingDetailScreen'
 import PhysioWalletScreen from '../screens/PhysioWalletScreen'
@@ -47,7 +48,17 @@ function PhysioBookingsStackInner() {
 function TabsWithBadges() {
   const nav = useNavigation()
   const { authEpoch } = useAuth()
-  const { bookingBadge } = usePhysioWorkspace()
+  const { bookingBadge, me, platformApproved } = usePhysioWorkspace()
+  const pending = Boolean(me && !platformApproved)
+
+  // Web PhysioLayout disables Wallet / Hours / Notes / Disputes until an admin approves the profile.
+  const lockWhilePending = ({ route }) => ({
+    tabPress: (e) => {
+      if (!pending || !isRouteLockedWhilePending(route.name)) return
+      e.preventDefault()
+      Toast.show({ type: 'info', text1: 'Available after approval', text2: 'An admin is reviewing your application.' })
+    },
+  })
   const [sosVisible, setSosVisible] = useState(false)
 
   const openSOS = useCallback(() => setSosVisible(true), [])
@@ -104,6 +115,7 @@ function TabsWithBadges() {
           />
           <Tab.Screen
             name="PhysioWalletTab"
+            listeners={lockWhilePending}
             component={PhysioWalletScreen}
             options={{
               title: 'Wallet',
@@ -116,6 +128,7 @@ function TabsWithBadges() {
           />
           <Tab.Screen
             name="PhysioAvailabilityTab"
+            listeners={lockWhilePending}
             component={PhysioAvailabilityScreen}
             options={{
               title: 'Hours',
@@ -128,6 +141,7 @@ function TabsWithBadges() {
           />
           <Tab.Screen
             name="PhysioNotesTab"
+            listeners={lockWhilePending}
             component={PhysioNotesScreen}
             options={{
               title: 'Notes',

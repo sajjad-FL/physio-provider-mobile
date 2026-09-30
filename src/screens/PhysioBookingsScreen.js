@@ -11,28 +11,35 @@ import {
   View,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import PhysioApprovalBanner from '../components/physio/PhysioApprovalBanner'
 import PhysioFilterModal from '../components/physio/PhysioFilterModal'
 import SessionsCalendarRN from '../components/physio/SessionsCalendarRN'
 import { DEFAULT_PHYSIO_FILTERS } from '../constants/physioBookingFilters'
-import { usePhysioWorkspaceOptional } from '../context/PhysioWorkspaceContext'
 import { usePhysioBookings } from '../api/queries'
 import { colors } from '../theme/colors'
 import { font, type, leading } from '../theme/typography'
 import { formatBookingDateAndSlot } from '../utils/date'
 import { normalizeIndianPhone } from '../utils/phoneIndia'
 import { matchesFilters } from '../utils/physioBookingHelpers'
+import { physioWorkflowMeta } from '../utils/physioWorkflow'
+
+/** List badge = web physioWorkflowMeta (Accept case / Create plan / Awaiting consent / Session overdue / …). */
+const TONE_ACCENT = {
+  urgent: '#f59e0b',
+  action: '#14b8a6',
+  waiting: '#3b82f6',
+  progress: '#10b981',
+  muted: colors.slate300,
+}
+const TONE_CHIP = {
+  urgent: { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' },
+  action: { bg: colors.teal50, fg: colors.teal800, border: colors.brandSoft },
+  waiting: { bg: colors.blue50, fg: colors.blue700, border: '#bfdbfe' },
+  progress: { bg: colors.emerald50, fg: colors.emerald700, border: '#a7f3d0' },
+  muted: { bg: colors.slate50, fg: colors.slate700, border: colors.slate200 },
+}
 
 function listStatusLabel(b) {
-  if (b.sessionStatus === 'completed' || b.status === 'completed') return 'Completed'
-  if (b.status === 'assigned') {
-    if (b.planStatus === 'proposed') return 'Awaiting Approval'
-    if (b.planStatus === 'approved') return 'Awaiting Acceptance'
-    return 'Propose Plan'
-  }
-  if (b.status === 'pending' || b.planStatus === 'requested') return 'Propose Plan'
-  if (b.rescheduled) return 'Rescheduled'
-  return 'Scheduled'
+  return physioWorkflowMeta(b).label
 }
 
 function patientInitial(name) {
@@ -41,37 +48,11 @@ function patientInitial(name) {
 }
 
 function statusAccent(b) {
-  if (b.sessionStatus === 'completed' || b.status === 'completed') return colors.success
-  if (b.status === 'assigned') {
-    if (b.planStatus === 'proposed') return colors.blue600
-    if (b.planStatus === 'approved') return colors.warning
-    return colors.warning
-  }
-  if (b.status === 'pending' || b.planStatus === 'requested') return colors.warning
-  if (b.rescheduled) return colors.warning
-  return colors.brand
+  return TONE_ACCENT[physioWorkflowMeta(b).tone] || TONE_ACCENT.muted
 }
 
 function statusChipColors(b) {
-  if (b.sessionStatus === 'completed' || b.status === 'completed') {
-    return { bg: colors.successBg, fg: colors.emerald700, border: '#a7f3d0' }
-  }
-  if (b.status === 'assigned') {
-    if (b.planStatus === 'proposed') {
-      return { bg: colors.blue50, fg: colors.blue800, border: '#bfdbfe' }
-    }
-    if (b.planStatus === 'approved') {
-      return { bg: '#fff7ed', fg: '#c2410c', border: '#ffedd5' }
-    }
-    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
-  }
-  if (b.status === 'pending' || b.planStatus === 'requested') {
-    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
-  }
-  if (b.rescheduled) {
-    return { bg: colors.amber50, fg: colors.amber800, border: '#fde68a' }
-  }
-  return { bg: colors.teal50, fg: colors.teal800, border: colors.brandSoft }
+  return TONE_CHIP[physioWorkflowMeta(b).tone] || TONE_CHIP.muted
 }
 
 function serviceChipColors(b) {
@@ -80,7 +61,6 @@ function serviceChipColors(b) {
 }
 
 export default function PhysioBookingsScreen({ navigation }) {
-  const ws = usePhysioWorkspaceOptional()
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_PHYSIO_FILTERS }))
   const [filterDraft, setFilterDraft] = useState(() => ({ ...DEFAULT_PHYSIO_FILTERS }))
   const [filterOpen, setFilterOpen] = useState(false)
@@ -94,14 +74,19 @@ export default function PhysioBookingsScreen({ navigation }) {
     isRefetching: refreshing,
     refetch,
     error: fetchError,
-  } = usePhysioBookings({ page: 1, limit: 100 })
+  } = usePhysioBookings(
+    filters.workflow && filters.workflow !== 'all'
+      ? { page: 1, limit: 100, workflow: filters.workflow }
+      : { page: 1, limit: 100 },
+  )
 
   const loadError = fetchError ? (fetchError?.response?.data?.message || 'Failed to load bookings') : ''
   const errorCode = fetchError ? String(fetchError?.response?.data?.code || '') : ''
   const deferredSearch = useDeferredValue(search)
 
   const filtersActive = useMemo(
-    () => filters.status !== 'all' || filters.service !== 'all' || filters.date !== 'all',
+    () =>
+      filters.workflow !== 'all' || filters.status !== 'all' || filters.service !== 'all' || filters.date !== 'all',
     [filters],
   )
 
@@ -140,20 +125,9 @@ export default function PhysioBookingsScreen({ navigation }) {
     return { total: bookings.length, today: todayCount, completed: completedCount, scheduled: scheduledCount }
   }, [bookings])
 
-  const showBanner = Boolean(ws?.me && ws?.platformApproved === false)
-
+  // Approval banner lives in PhysioTopNavHeader (shown on every workspace screen, like web PhysioLayout).
   const header = (
     <View style={styles.headerBlock}>
-      {showBanner ? (
-        <View style={styles.bannerWrap}>
-          <PhysioApprovalBanner
-            rejected={ws.rejected}
-            onPressOnboarding={() => navigation.getParent()?.getParent()?.navigate('PhysioOnboarding')}
-            onPressProfile={() => navigation.getParent()?.getParent()?.navigate('ProfileGlobal')}
-          />
-        </View>
-      ) : null}
-
       {/* ── Stats strip ──────────────────────────── */}
       {!loading && bookings.length > 0 ? (
         <View style={styles.statsStrip}>
@@ -440,7 +414,6 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e8f8f6' },
 
   headerBlock: { paddingTop: 8, paddingBottom: 12 },
-  bannerWrap: { marginBottom: 10 },
 
   // Stats strip
   statsStrip: {

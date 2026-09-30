@@ -13,8 +13,9 @@ module.exports = () => {
       ? process.env.EXPO_PUBLIC_EAS_PROJECT_ID.trim()
       : ''
   const fromJson = String((expo.extra || {}).eas?.projectId || '').trim()
+  // physiokhom-pro EAS project (not the patient app's `physiokhom`)
   const projectId =
-    fromEnv || fromJson || '64e19898-a95a-4bae-a270-8d4a0645c2d8'
+    fromEnv || fromJson || '1594ac7d-0281-47c7-a6ee-099b6cff29a8'
   /** Prefer EXPO_MAPBOX_TOKEN in `.env`; optional override EXPO_PUBLIC_MAPBOX_TOKEN. */
   const mapboxAccessToken = String(
     process.env.EXPO_MAPBOX_TOKEN ||
