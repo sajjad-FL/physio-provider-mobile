@@ -129,6 +129,7 @@ export function matchesFilters(b, filters) {
 
   if (filters.service === 'online' && b.serviceType !== 'online') return false
   if (filters.service === 'home' && b.serviceType !== 'home') return false
+  if (filters.service === 'clinic' && b.serviceType !== 'clinic') return false
 
   const t = todayYmd()
   const d = String(b.date || '')

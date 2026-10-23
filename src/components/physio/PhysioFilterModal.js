@@ -18,6 +18,7 @@ const SERVICE_ROW = [
   { value: 'all', label: 'All' },
   { value: 'online', label: 'Online' },
   { value: 'home', label: 'Home' },
+  { value: 'clinic', label: 'Clinic' },
 ]
 const DATE_ROW = [
   { value: 'all', label: 'Any date' },

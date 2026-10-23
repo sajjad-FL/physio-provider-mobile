@@ -85,7 +85,7 @@ export function buildPhysioWorkflowSteps(ctx) {
       id: 'patient',
       num: 1,
       label: 'Patient',
-      hint: b.userId?.name || 'Home visit',
+      hint: b.userId?.name || (b.serviceType === 'clinic' ? 'Clinic visit' : 'Home visit'),
       state: 'done',
     },
     {

@@ -21,6 +21,7 @@ import {
   paymentStatusLabel,
   billingTypeLabel,
   bookingCodeBadge,
+  serviceTypeLabel,
 } from '../utils/bookingDisplay'
 import { isPlanLive } from '../utils/planStatus'
 import { buildSessionPaymentMap, defaultCollectionSessionId } from '../utils/sessionPaymentMap'
@@ -764,7 +765,7 @@ export default function PhysioBookingDetailScreen({ route, navigation }) {
               </View>
               <View style={styles.wfChipRow}>
                 <View style={styles.wfChip}>
-                  <Text style={styles.wfChipTxt}>{b.serviceType === 'online' ? 'Online' : 'Home visit'}</Text>
+                  <Text style={styles.wfChipTxt}>{b.serviceType === 'online' ? 'Online' : `${serviceTypeLabel(b.serviceType)} visit`}</Text>
                 </View>
                 <View style={styles.wfChip}>
                   <Text style={styles.wfChipTxt}>Hold: {paymentStatusLabel(b.paymentStatus)}</Text>

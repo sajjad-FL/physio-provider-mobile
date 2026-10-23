@@ -57,6 +57,7 @@ function statusChipColors(b) {
 
 function serviceChipColors(b) {
   if (b.serviceType === 'online') return { bg: colors.blue50, fg: colors.blue600, border: '#bfdbfe', label: 'Online' }
+  if (b.serviceType === 'clinic') return { bg: '#fff7ed', fg: '#7c2d12', border: '#fed7aa', label: 'Clinic' }
   return { bg: '#dcfce7', fg: '#166534', border: '#a7f3d0', label: 'Home' }
 }
 
